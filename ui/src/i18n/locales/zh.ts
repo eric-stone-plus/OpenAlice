@@ -1840,6 +1840,10 @@ export const zh: Resources = {
     launchError: '无法启动工作台主管。',
     resumeError: '无法恢复这段主管对话。',
   },
+  sessionMode: {
+    label: '会话模式',
+    experimental: '实验性',
+  },
   chatLanding: {
     startingSession: '正在启动会话…',
     uiMode: 'UI 模式',

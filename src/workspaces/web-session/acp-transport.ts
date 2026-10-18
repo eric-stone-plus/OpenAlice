@@ -15,6 +15,7 @@ import {
   type WebPermissionRequest,
   type WebRequestOption,
   type WebRequestOptionTone,
+  type WebSessionConfigOption,
 } from './model.js'
 import { TranscriptBuilder } from './transcript-builder.js'
 import type { WebSessionTransport, WebTransportContext } from './transport.js'
@@ -55,7 +56,8 @@ export class AcpTransport implements WebSessionTransport {
     const params = { cwd: this.ctx.input.cwd, mcpServers: [] }
     try {
       if (this.sessionId && canLoad) {
-        await this.peer.request('session/load', { sessionId: this.sessionId, ...params }, SESSION_LOAD_TIMEOUT_MS)
+        const loaded = await this.peer.request('session/load', { sessionId: this.sessionId, ...params }, SESSION_LOAD_TIMEOUT_MS)
+        this.applyConfigOptions(loaded)
         this.flushUser()
         this.builder.endTurn()
       } else {
@@ -66,11 +68,13 @@ export class AcpTransport implements WebSessionTransport {
         const id = isJsonObject(created) ? stringOrNull(created['sessionId']) : null
         if (!id) throw new Error('ACP session/new returned no sessionId')
         this.sessionId = id
+        this.applyConfigOptions(created)
       }
     } catch (error) {
       throw describeAcpFailure(error, this.ctx.input.agent)
     }
     this.ctx.state.setNativeSessionId(this.sessionId)
+    if (this.ctx.input.agentMode) await this.configure('mode', this.ctx.input.agentMode)
     this.ctx.state.setPhase('idle')
   }
 
@@ -96,6 +100,16 @@ export class AcpTransport implements WebSessionTransport {
   async abort(): Promise<void> {
     if (!this.sessionId) return
     await this.peer.notify('session/cancel', { sessionId: this.sessionId })
+  }
+
+  async configure(configId: string, value: string): Promise<void> {
+    if (!this.sessionId) throw new Error('ACP session is not established')
+    const result = await this.peer.request('session/set_config_option', {
+      sessionId: this.sessionId,
+      configId,
+      value,
+    })
+    this.applyConfigOptions(result)
   }
 
   async respond(requestId: string, optionId: string): Promise<void> {
@@ -170,10 +184,19 @@ export class AcpTransport implements WebSessionTransport {
         this.applyToolStatus(id, update)
         break
       }
+      case 'config_option_update':
+        this.applyConfigOptions(update)
+        break
       default:
-        // plan, available_commands_update, current_mode_update, config_option_update
+        // plan, available_commands_update, current_mode_update
         break
     }
+  }
+
+  /** Store runtime-advertised config selects (model/effort/mode). */
+  private applyConfigOptions(value: unknown): void {
+    const options = configOptionsFrom(value)
+    if (options.length > 0) this.ctx.state.setConfigOptions(options)
   }
 
   private applyToolStatus(id: string, update: JsonObject): void {
@@ -283,6 +306,44 @@ function diffPreview(oldText: string | null, newText: string): string {
   const removed = oldText ? oldText.split('\n').map((line) => `- ${line}`) : []
   const added = newText.split('\n').map((line) => `+ ${line}`)
   return [...removed, ...added].join('\n')
+}
+
+function configOptionsFrom(value: unknown): WebSessionConfigOption[] {
+  if (!isJsonObject(value)) return []
+  const raw = value['configOptions']
+  if (!Array.isArray(raw)) return []
+  return raw.flatMap((entry): WebSessionConfigOption[] => {
+    if (!isJsonObject(entry) || entry['type'] !== 'select') return []
+    const id = stringOrNull(entry['id'])
+    const name = stringOrNull(entry['name'])
+    const currentValue = stringOrNull(entry['currentValue'])
+    if (!id || !name || currentValue === null) return []
+    const description = stringOrNull(entry['description'])
+    const category = stringOrNull(entry['category'])
+    const options = Array.isArray(entry['options'])
+      ? entry['options'].flatMap((option): WebSessionConfigOption['options'][number][] => {
+          if (!isJsonObject(option)) return []
+          const optionValue = stringOrNull(option['value'])
+          const optionName = stringOrNull(option['name'])
+          if (optionValue === null || optionName === null) return []
+          const optionDescription = stringOrNull(option['description'])
+          return [{
+            value: optionValue,
+            name: optionName,
+            ...(optionDescription ? { description: optionDescription } : {}),
+          }]
+        })
+      : []
+    return [{
+      id,
+      name,
+      type: 'select',
+      currentValue,
+      options,
+      ...(description ? { description } : {}),
+      ...(category ? { category } : {}),
+    }]
+  })
 }
 
 function describeAcpFailure(error: unknown, agent: string): Error {

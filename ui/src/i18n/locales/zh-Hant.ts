@@ -1844,6 +1844,10 @@ export const zhHant: Resources = {
     launchError: '無法啟動工作臺主管。',
     resumeError: '無法恢復這段主管對話。',
   },
+  sessionMode: {
+    label: '工作階段模式',
+    experimental: '實驗性',
+  },
   chatLanding: {
     startingSession: '正在啟動工作階段…',
     uiMode: 'UI 模式',

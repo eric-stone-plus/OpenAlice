@@ -19,7 +19,11 @@ export function SessionActivation(props: {
   const { opening, error, activate } = useSessionActivation({
     record: props.record, workspaceId: props.workspaceId,
     enabled: props.enabled !== false, automatic: props.automatic !== false,
-    open: () => props.record.surface === 'webpi' && props.onOpenWeb ? props.onOpenWeb() : props.onResume(),
+    // OpenAlice's opencode sessions always reopen in the GUI, even when the
+    // record predates the GUI-only switch.
+    open: () => (props.record.surface === 'webpi' || props.record.agent === 'opencode') && props.onOpenWeb
+      ? props.onOpenWeb()
+      : props.onResume(),
     busyMessage: t('chat.headlessBusyDescription'),
     ...(props.workspaceId ? { onBusy: () => inspectOccupiedSession({ record: props.record, workspaceId: props.workspaceId!, source: props.source }) } : {}),
   })

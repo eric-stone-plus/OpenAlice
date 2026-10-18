@@ -363,6 +363,7 @@ function demoManagerSnapshot(): WebSessionSnapshot {
     messages: demoManagerMessages,
     streamingMessage: null,
     requests: [],
+    configOptions: [],
     error: null,
     stderrTail: '',
     revision: demoManagerMessages.length,

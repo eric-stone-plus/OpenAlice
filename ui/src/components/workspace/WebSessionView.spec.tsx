@@ -51,6 +51,7 @@ function snapshot(phase: WebSessionSnapshot['phase'], overrides: Partial<WebSess
     messages: [],
     streamingMessage: null,
     requests: [],
+    configOptions: [],
     error: null,
     stderrTail: '',
     revision: 1,

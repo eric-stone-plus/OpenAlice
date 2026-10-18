@@ -21,7 +21,7 @@ import { useHarnessWorkbenchContext } from '../components/harness/context'
 import { useEffect, useRef } from 'react'
 import { useSessionTakeovers } from '../hooks/useSessionTakeovers'
 import type { SessionRecord } from '../components/workspace/api'
-import { Monitor, Settings } from 'lucide-react'
+import { Settings } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import '@xterm/xterm/css/xterm.css'
 
@@ -35,7 +35,6 @@ import { WorkspaceView } from '../components/workspace/WorkspaceView'
 import { PageTopBar } from '../components/PageTopBar'
 import { WorkspaceFilesToggle } from '../components/workspace/WorkspaceFilesToggle'
 import { Button } from '../components/ui/button'
-import { AgentRuntimeIcon } from '../lib/agentRuntimeIcon'
 import { visibleAgentRuntimes } from '../lib/agentRuntimeVisibility'
 import type { ViewSpec } from '../tabs/types'
 
@@ -73,6 +72,21 @@ export function WorkspacePage({ spec, visible }: Props) {
     if (handedOver || !visible || activeRecord?.state !== 'running' || activeRecord.surface !== 'headless') return
     inspectOccupiedSession({ record: activeRecord, workspaceId: wsId, source })
   }, [visible, activeRecord, wsId, sessionId, source, handedOver])
+  // OpenAlice is GUI-only. A legacy opencode Session that is still running in
+  // a PTY is moved to the structured Web surface on first open; the TUI is no
+  // longer a product surface.
+  const convertingToWeb = useRef<string | null>(null)
+  useEffect(() => {
+    if (!visible || handedOver) return
+    const record = activeRecord
+    if (!record || record.state !== 'running' || record.surface !== 'terminal') return
+    if (!agentSupportsWeb(ctx.agents, record.agent)) return
+    if (convertingToWeb.current === record.id) return
+    convertingToWeb.current = record.id
+    void Promise.resolve(ctx.openWebSession(wsId, record.id, source)).catch((err) => {
+      console.error('workspace.gui_migration_failed', err)
+    })
+  }, [visible, handedOver, activeRecord, ctx, wsId, source])
   const visibleRuntimeAgents = visibleAgentRuntimes(ctx.agents).filter((agent) => agent.kind !== 'utility')
   const configuredDefaultAgent = workspace?.defaultAgent ?? ctx.defaultAgent
   const effectiveDefaultAgent = configuredDefaultAgent !== null
@@ -139,36 +153,8 @@ export function WorkspacePage({ spec, visible }: Props) {
   const pausedCanvas = shownRecord?.state === 'paused'
   const webCanvas = shownRecord?.state === 'running' && shownRecord.surface === 'webpi'
   const workspaceCanvas = terminalCanvas || webCanvas || pausedCanvas
-  // The surface toggle is offered only for runtimes that expose a structured
-  // protocol; a TUI-only runtime keeps its terminal without a dead button.
-  const canSwitchSurface = !handedOver && activeRecord?.state === 'running' && activeRecord.surface !== 'headless'
-    && (webCanvas || agentSupportsWeb(ctx.agents, activeRecord.agent))
-  const runtimeLabel = activeRecord
-    ? ctx.agents.find((agent) => agent.id === activeRecord.agent)?.displayName ?? activeRecord.agent
-    : ''
   const workspaceActions = (
     <>
-      {activeRecord && canSwitchSurface && (
-        <Button
-          type="button"
-          onClick={() => {
-            if (webCanvas) {
-              void ctx.resumeSession(wsId, activeRecord.id, source)
-            } else {
-              void ctx.openWebSession(wsId, activeRecord.id, source)
-            }
-          }}
-          variant="ghost"
-          size="sm"
-          className="text-[11px]"
-          title={webCanvas ? `Open this ${runtimeLabel} Session in the terminal` : `Open this ${runtimeLabel} Session in Web`}
-        >
-          {webCanvas
-            ? <Monitor size={13} strokeWidth={2.25} aria-hidden="true" />
-            : <AgentRuntimeIcon agentId={activeRecord.agent} className="h-[13px] w-[13px]" />}
-          {webCanvas ? 'TUI' : 'GUI'}
-        </Button>
-      )}
       <WorkspaceFilesToggle />
       {!workbench && <Button
         type="button"

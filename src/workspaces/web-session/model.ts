@@ -70,6 +70,21 @@ export type WebSessionPhase =
   | 'stopped'
   | 'failed'
 
+/** One runtime-owned select (model, effort, session mode/agent, …). */
+export interface WebSessionConfigOption {
+  readonly id: string
+  readonly name: string
+  readonly description?: string
+  readonly category?: string
+  readonly type: 'select'
+  readonly currentValue: string
+  readonly options: readonly {
+    readonly value: string
+    readonly name: string
+    readonly description?: string
+  }[]
+}
+
 export interface WebSessionSnapshot {
   readonly recordId: string
   readonly wsId: string
@@ -85,6 +100,8 @@ export interface WebSessionSnapshot {
   /** Current cumulative in-flight assistant message; replaced, never accumulated. */
   readonly streamingMessage: WebConversationMessage | null
   readonly requests: readonly WebPermissionRequest[]
+  /** Runtime-advertised config selects; empty until the transport learns them. */
+  readonly configOptions: readonly WebSessionConfigOption[]
   readonly error: string | null
   readonly stderrTail: string
   readonly revision: number

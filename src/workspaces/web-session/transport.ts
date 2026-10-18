@@ -3,6 +3,7 @@ import {
   type JsonObject,
   type WebConversationMessage,
   type WebPermissionRequest,
+  type WebSessionConfigOption,
   type WebSessionPhase,
   type WebSessionWire,
 } from './model.js'
@@ -25,6 +26,11 @@ export interface StartWebSessionInput {
   /** Runtime-specific launch options the transport may forward in-band. */
   readonly model?: string
   readonly reasoningEffort?: string
+  /**
+   * Runtime session mode (for opencode: the primary agent id, e.g. auto/goal).
+   * Applied after session/new or session/load and before the first prompt.
+   */
+  readonly agentMode?: string
 }
 
 /**
@@ -37,6 +43,7 @@ export class WebSessionState {
   messages: readonly WebConversationMessage[] = []
   streamingMessage: WebConversationMessage | null = null
   requests: readonly WebPermissionRequest[] = []
+  configOptions: readonly WebSessionConfigOption[] = []
   error: string | null = null
   revision = 0
 
@@ -55,6 +62,11 @@ export class WebSessionState {
   setNativeSessionId(id: string | null): void {
     if (id === this.nativeSessionId) return
     this.nativeSessionId = id
+    this.bump()
+  }
+
+  setConfigOptions(options: readonly WebSessionConfigOption[]): void {
+    this.configOptions = options
     this.bump()
   }
 
@@ -145,6 +157,8 @@ export interface WebSessionTransport {
   abort(): Promise<void>
   /** Answer one outstanding request with the chosen option id. */
   respond(requestId: string, optionId: string, text?: string): Promise<void>
+  /** Change one runtime config select (model, effort, mode, …). */
+  configure?(configId: string, value: string): Promise<void>
   /** Polite shutdown before the host closes stdin and signals the process. */
   dispose?(): void
 }

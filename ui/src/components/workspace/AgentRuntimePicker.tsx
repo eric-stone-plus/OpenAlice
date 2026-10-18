@@ -85,6 +85,14 @@ function AgentRuntimeRow({
             </span>
           )}
         </span>
+        {agent.binPath && (
+          <span
+            className="mt-0.5 block truncate font-mono text-[10px] font-normal text-muted-foreground"
+            title={agent.binPath}
+          >
+            {agent.binPath}
+          </span>
+        )}
       </span>
       {selected && <span className="mt-0.5"><SelectionCheckIcon /></span>}
     </button>

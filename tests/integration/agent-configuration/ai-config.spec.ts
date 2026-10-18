@@ -469,7 +469,9 @@ describe('opencodeAdapter AI-config', () => {
   it('keeps OpenAlice MCP out of opencode env even when an MCP URL is present', () => {
     const env = opencodeAdapter.composeEnv!({ cwd: dir, env: mcpEnv });
     expect(env['OPENCODE_DISABLE_MODELS_FETCH']).toBe('1');
-    expect(env['OPENCODE_DISABLE_AUTOUPDATE']).toBe('1');
+    // Match the terminal wrapper: auto-update stays enabled, and the app never
+    // injects an OPENCODE_CONFIG_CONTENT or permission override here.
+    expect(env['OPENCODE_DISABLE_AUTOUPDATE']).toBeUndefined();
     expect(env['OPENCODE_DISABLE_LSP_DOWNLOAD']).toBe('1');
     expect(env['OPENCODE_CONFIG_CONTENT']).toBeUndefined();
   });

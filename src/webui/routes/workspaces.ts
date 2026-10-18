@@ -381,6 +381,8 @@ export function createWorkspaceRoutes(
       readonly credentialSlug?: string;
       readonly model?: string;
       readonly reasoningEffort?: ModelReasoningEffort;
+      /** Runtime primary-agent mode (opencode: auto/goal), applied before the first prompt. */
+      readonly agentMode?: string;
       /** Birth stamp when allocating a new product Session (omit when resuming). */
       readonly createdBy?: SessionCreatedBy;
     },
@@ -566,7 +568,9 @@ export function createWorkspaceRoutes(
       if (opts.surface === 'webpi') {
         operationLease?.release();
         releaseClaim();
-        const snapshot = await svc.executions.web(meta, record, opts.origin);
+        const snapshot = await svc.executions.web(meta, record, opts.origin, {
+          ...(opts.agentMode ? { agentMode: opts.agentMode } : {}),
+        });
         if (initialPrompt) await svc.web.prompt(record.id, initialPrompt);
         releaseClaim();
         return { ok: true, session: { sessionId: record.id, wsId: id, name: record.name, agent: adapter.id, resumeId: record.resumeId, pid: snapshot.pid ?? 0, startedAt: snapshot.startedAt, title: sessionPreferredTitle(record) ?? null, surface: 'webpi' } };
@@ -2021,9 +2025,12 @@ export function createWorkspaceRoutes(
     let credentialSlug: string | undefined;
     let model: string | undefined;
     let reasoningEffort: ModelReasoningEffort | undefined;
+    let agentMode: 'auto' | 'goal' | undefined;
+    let surface: 'terminal' | 'webpi' | undefined;
     try {
       const body = await safeJson(c);
       const fields = body && typeof body === 'object' ? (body as Record<string, unknown>) : {};
+      if (fields['surface'] === 'terminal' || fields['surface'] === 'webpi') surface = fields['surface'];
       const rawResumeId = fields['resumeId'];
       if (typeof rawResumeId === 'string' && validId(rawResumeId)) resumeId = rawResumeId;
       const rawAgent = fields['agent'];
@@ -2035,6 +2042,7 @@ export function createWorkspaceRoutes(
       if (typeof rawModel === 'string' && rawModel.trim().length > 0) model = rawModel.trim();
       const rawEffort = fields['reasoningEffort'];
       if (isModelReasoningEffort(rawEffort)) reasoningEffort = rawEffort;
+      if (fields['agentMode'] === 'auto' || fields['agentMode'] === 'goal') agentMode = fields['agentMode'];
       // Quick-chat seed (fresh-only): a first message the TUI opens already
       // working on. Ignored when resuming — seeding + resume is ambiguous on
       // codex's `resume <id>` / pi's `--session-id`.
@@ -2046,6 +2054,7 @@ export function createWorkspaceRoutes(
     }
     const result = await spawnInteractiveSession(meta, {
       origin: { kind: 'user', entry: 'session-spawn' },
+      ...(surface !== undefined ? { surface } : {}),
       ...(agentId !== undefined ? { agentId } : {}),
       ...(resumeId !== undefined ? { resumeId } : {}),
       ...(initialPrompt !== undefined ? { initialPrompt } : {}),
@@ -2053,6 +2062,7 @@ export function createWorkspaceRoutes(
       ...(credentialSlug !== undefined ? { credentialSlug } : {}),
       ...(model !== undefined ? { model } : {}),
       ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
+      ...(agentMode !== undefined ? { agentMode } : {}),
       // Resume reuses an existing product Session; only fresh spawns stamp birth.
       ...(resumeId === undefined
         ? { createdBy: { kind: 'interactive' as const, surface: 'spawn' as const } }
@@ -2074,6 +2084,7 @@ export function createWorkspaceRoutes(
     let credentialSlug: string | undefined;
     let model: string | undefined;
     let reasoningEffort: ModelReasoningEffort | undefined;
+    let agentMode: 'auto' | 'goal' | undefined;
     let targetWsId: string | undefined;
     let templateName = 'chat';
     try {
@@ -2097,6 +2108,7 @@ export function createWorkspaceRoutes(
       if (typeof rawModel === 'string' && rawModel.trim().length > 0) model = rawModel.trim();
       const rawEffort = fields['reasoningEffort'];
       if (isModelReasoningEffort(rawEffort)) reasoningEffort = rawEffort;
+      if (fields['agentMode'] === 'auto' || fields['agentMode'] === 'goal') agentMode = fields['agentMode'];
       // Optional: spawn into THIS existing workspace instead of today's. The
       // chat sidebar's per-workspace "+" ("Ask Alice, but in this workspace").
       const rawTarget = fields['targetWsId'];
@@ -2214,6 +2226,7 @@ export function createWorkspaceRoutes(
       ...(credentialSlug !== undefined ? { credentialSlug } : {}),
       ...(model !== undefined ? { model } : {}),
       ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
+      ...(agentMode !== undefined ? { agentMode } : {}),
       initialPrompt: prompt,
       createdBy: {
         kind: 'interactive',
@@ -2725,6 +2738,28 @@ export function createWorkspaceRoutes(
       return c.json({ ok: true, snapshot });
     } catch (err) {
       return c.json({ error: 'web_respond_failed', message: (err as Error).message }, 409);
+    }
+  });
+
+  // Change one runtime-advertised select on a live Web session. OpenAlice uses
+  // this for the Auto/Goal agent mode; the transport validates the id/value
+  // against the options the runtime itself advertised.
+  app.post('/:id/sessions/:sid/web/config', async (c) => {
+    const ctx = webSessionContext(c);
+    if (!ctx) return c.json({ error: 'not_found' }, 404);
+    const body = await safeJson(c).catch(() => null);
+    const fields = body && typeof body === 'object' ? body as Record<string, unknown> : {};
+    const configId = fields['configId'];
+    const value = fields['value'];
+    if (typeof configId !== 'string' || !configId || typeof value !== 'string' || !value) {
+      return c.json({ error: 'bad_request', message: 'configId and value are required' }, 400);
+    }
+    try {
+      const snapshot = await svc.web.configure(ctx.token, configId, value);
+      await svc.sessionRegistry.update(ctx.id, ctx.token, { lastActiveAt: new Date().toISOString() });
+      return c.json({ ok: true, snapshot });
+    } catch (err) {
+      return c.json({ error: 'web_config_failed', message: (err as Error).message }, 409);
     }
   });
 

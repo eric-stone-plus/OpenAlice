@@ -3,6 +3,7 @@ import type { ConversationItem } from '../conversation/types'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   abortWebSession,
+  configureWebSession,
   openWebSession,
   type PausedSessionRuntimeUpdate,
   getWebSession,
@@ -88,6 +89,9 @@ export function useWebConversation(wsId: string, sessionId: string, readOnly = f
     stop: async () => { accept(await abortWebSession(wsId, sessionId)) },
     respond: async (requestId: string, optionId: string, text?: string) => {
       accept(await respondWebSession(wsId, sessionId, requestId, optionId, text))
+    },
+    configure: async (configId: string, value: string) => {
+      accept(await configureWebSession(wsId, sessionId, configId, value))
     },
   }
 }

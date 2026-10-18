@@ -96,6 +96,26 @@ describe('configureAutoUpdate', () => {
       .toHaveBeenCalledWith('https://github.com/TraderAlice/OpenAlice/releases')
   })
 
+  it('reports a missing Linux beta feed as unsupported instead of a raw error', async () => {
+    mocks.app.isPackaged = true
+    mocks.capability = { enabled: true, configPath: '/opt/OpenAlice/resources/app-update.yml' }
+    mocks.autoUpdater.checkForUpdates.mockRejectedValue(
+      new Error('Cannot find channel "beta-linux-yml" update info: HttpError: 404 Not Found'),
+    )
+
+    const controls = configureAutoUpdate({
+      isDestroyed: () => false,
+      webContents: { send: vi.fn() },
+    } as never, { beforeInstall: vi.fn(async () => {}) }, '0.95.0-beta')
+
+    await expect(controls.discover()).resolves.toMatchObject({
+      status: 'unsupported',
+      message: 'No update feed is published for this Linux build.',
+      currentVersion: '0.95.0-beta',
+      channel: 'beta',
+    })
+  })
+
   it('deduplicates owner discovery without exposing a second check IPC', async () => {
     mocks.app.isPackaged = true
     mocks.capability = { enabled: true, configPath: '/Applications/OpenAlice.app/app-update.yml' }

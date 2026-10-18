@@ -49,7 +49,6 @@ function readOpenCodeSessionRows(cwd: string): Promise<readonly Record<string, u
         env: {
           ...process.env,
           OPENCODE_DISABLE_MODELS_FETCH: '1',
-          OPENCODE_DISABLE_AUTOUPDATE: '1',
           OPENCODE_DISABLE_LSP_DOWNLOAD: '1',
         },
         timeout: 10_000,
@@ -354,11 +353,9 @@ export const opencodeAdapter: CliAdapter = {
         }
         env['OPENCODE_CONFIG_CONTENT'] = JSON.stringify({ ...inherited, model: selectedModel });
       }
-      const config: unknown = JSON.parse(env['OPENCODE_CONFIG_CONTENT'] ?? _ctx.env['OPENCODE_CONFIG_CONTENT'] ?? '{}');
-      if (!config || typeof config !== 'object' || Array.isArray(config)) {
-        throw new Error('OPENCODE_CONFIG_CONTENT must contain a JSON object');
-      }
-      env['OPENCODE_CONFIG_CONTENT'] = JSON.stringify({ ...config, permission: 'allow' });
+      // Do not add a permission override: the terminal's opencode config owns
+      // permissions, and the ACP transport already handles permission prompts.
+      // Only the app-specific provider/model projection is added above.
       return { env, interactiveArgs, headlessArgs, webArgs: [] };
     },
   },
@@ -506,9 +503,12 @@ export const opencodeAdapter: CliAdapter = {
   },
 
   composeEnv(ctx: SpawnContext): Record<string, string> {
+    // Match the terminal's opencode wrapper: pin only the model-catalog and
+    // LSP-download fetches. Do not disable auto-update and do not inject a
+    // permission override here — the app must run the same opencode build and
+    // config as the terminal, not a downgraded or more permissive variant.
     const env: Record<string, string> = {
       OPENCODE_DISABLE_MODELS_FETCH: '1',
-      OPENCODE_DISABLE_AUTOUPDATE: '1',
       OPENCODE_DISABLE_LSP_DOWNLOAD: '1',
     };
 

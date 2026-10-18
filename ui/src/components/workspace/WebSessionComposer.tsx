@@ -1,24 +1,42 @@
-import { useEffect } from 'react'
-import type { AgentInfo, PausedSessionRuntimeUpdate, SessionRecord } from './api'
-import { AgentChatComposer } from './AgentChatComposer'
 import type { ChatComposerProps } from '../conversation/ChatComposer'
-import { useWebSessionModelConfig } from '../../hooks/useWebSessionModelConfig'
-import { useWorkspace } from '../../tabs/store'
+import { ChatComposer } from '../conversation/ChatComposer'
+import type { WebSessionConfigOption } from './api'
+import { SESSION_MODE_OPTIONS, SessionModeSelect } from './SessionModeSelect'
 
+/**
+ * Composer for a live GUI conversation. Model and effort are intentionally
+ * absent: both Auto and Goal are opencode primary agents pinned to
+ * deepseek-flash at max effort. The only runtime choice is the session mode,
+ * which is an experimental OpenAlice surface for now.
+ */
 export function WebSessionComposer(props: {
-  composer: ChatComposerProps;
-  workspaceId: string; record: SessionRecord; agents: readonly AgentInfo[]; busy: boolean;
-  reconfigure(update: PausedSessionRuntimeUpdate): Promise<void>;
-  onReadyChange(ready: boolean): void;
+  composer: ChatComposerProps
+  configOptions?: readonly WebSessionConfigOption[]
+  busy?: boolean
+  onConfigure?: (configId: string, value: string) => Promise<void> | void
 }) {
-  const busy = props.busy || !!props.composer.pending
-  const model = useWebSessionModelConfig({ ...props, busy })
-  useEffect(() => { props.onReadyChange(!model.dirty && !model.error) }, [model.dirty, model.error, props.onReadyChange])
-  const openOrFocus = useWorkspace(state => state.openOrFocus)
-  return <AgentChatComposer {...props.composer} config={model.config} configurationDisabled={busy}
-    canSend={props.composer.canSend && !model.dirty && !model.error}
-    onConfigureProvider={() => openOrFocus({ kind: 'settings', params: { category: 'ai-provider' } })}
-    details={model.error && <div role="alert" className="px-2 text-xs text-destructive">
-      {model.error} <button type="button" onClick={model.retry}>Retry configuration</button>
-    </div>} />
+  const mode = props.configOptions?.find((option) => option.id === 'mode')
+  const advertised = mode
+    ? mode.options
+        .filter((option) => option.value === 'auto' || option.value === 'goal')
+        .map((option) => ({
+          value: option.value,
+          label: option.name,
+          ...(option.description ? { description: option.description } : {}),
+        }))
+    : []
+  const options = advertised.length > 0 ? advertised : SESSION_MODE_OPTIONS
+  return (
+    <ChatComposer
+      {...props.composer}
+      controls={(
+        <SessionModeSelect
+          value={mode?.currentValue ?? 'auto'}
+          options={options}
+          disabled={props.busy}
+          onChange={(value) => { void props.onConfigure?.('mode', value) }}
+        />
+      )}
+    />
+  )
 }

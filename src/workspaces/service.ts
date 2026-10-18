@@ -442,7 +442,7 @@ export interface WorkspaceService {
   readonly web: Omit<WebSessionHost, 'start' | 'stop' | 'stopAll'>;
   readonly executions: {
     terminal(wsId: string, context: SessionFactoryContext, origin: ExecutionOrigin): Promise<SessionView>;
-    web(meta: WorkspaceMeta, record: SessionRecord, origin: ExecutionOrigin, opts?: { appendSystemPrompt?: string; skills?: readonly string[]; approveProject?: boolean; runtimeSelection?: SessionRuntimeSelection }): Promise<WebSessionSnapshot>;
+    web(meta: WorkspaceMeta, record: SessionRecord, origin: ExecutionOrigin, opts?: { appendSystemPrompt?: string; skills?: readonly string[]; approveProject?: boolean; runtimeSelection?: SessionRuntimeSelection; agentMode?: string }): Promise<WebSessionSnapshot>;
     stop(resumeId: string, reason: string): Promise<boolean>;
     dispatch(
       meta: WorkspaceMeta,
@@ -3042,6 +3042,7 @@ export async function createWorkspaceService(opts: CreateWorkspaceServiceOptions
       skills?: readonly string[];
       approveProject?: boolean;
       runtimeSelection?: SessionRuntimeSelection;
+      agentMode?: string;
     } = {},
   ): Promise<WebSessionSnapshot> => {
     origin = validateExecutionOrigin(origin);
@@ -3162,6 +3163,7 @@ export async function createWorkspaceService(opts: CreateWorkspaceServiceOptions
           ...(nativeSessionId ? { nativeSessionId } : {}),
           ...(sessionRuntime.binding.model ? { model: sessionRuntime.binding.model } : {}),
           ...(sessionRuntime.binding.reasoningEffort ? { reasoningEffort: sessionRuntime.binding.reasoningEffort } : {}),
+          ...(opts.agentMode ? { agentMode: opts.agentMode } : {}),
         }, completion => { completed = completion; });
         await report(snapshot.phase);
         return { value: snapshot, pid: snapshot.pid ?? undefined, completed };
@@ -3549,6 +3551,14 @@ export async function createWorkspaceService(opts: CreateWorkspaceServiceOptions
           executionManager.takeovers.activity(snapshot.resumeId);
         }
         return web.respond(recordId, requestId, optionId, text);
+      },
+      configure: async (recordId, configId, value) => {
+        const snapshot = web.get(recordId);
+        if (snapshot) {
+          if (executionManager.takeovers.isHandingOff(snapshot.resumeId)) throw new HeadlessResumeError('busy', 'Session handoff is in progress');
+          executionManager.takeovers.activity(snapshot.resumeId);
+        }
+        return web.configure(recordId, configId, value);
       },
     },
     managerWorkspace,

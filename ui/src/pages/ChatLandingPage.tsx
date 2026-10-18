@@ -9,7 +9,7 @@ import {
   type ReactNode,
 } from 'react'
 import { useTranslation } from 'react-i18next'
-import { AgentChatComposer } from '../components/workspace/AgentChatComposer'
+import { ChatComposer } from '../components/conversation/ChatComposer'
 import { ConversationLayout } from '../components/conversation/ConversationLayout'
 import { PageTopBar } from '../components/PageTopBar'
 import { PetLogo } from '../components/PetLogo'
@@ -17,14 +17,12 @@ import {
   BriefcaseBusiness,
   CalendarClock,
   ChartNoAxesCombined,
-  ChevronDown,
   CircleAlert,
   Code2,
   FileSearch,
   FlaskConical,
   Inbox,
   KeyRound,
-  LayoutGrid,
   LoaderCircle,
   ExternalLink,
   RefreshCw,
@@ -39,13 +37,7 @@ import {
   AgentLaunchSelectors,
   type AgentLaunchSelectorsHandle,
 } from '../components/workspace/AgentLaunchControls'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuTrigger,
-} from '../components/ui/dropdown-menu'
+import { SessionModeSelect } from '../components/workspace/SessionModeSelect'
 import { RecoverySurface, RefreshNotice } from '../components/StateViews'
 import { Button } from '../components/ui/button'
 import {
@@ -239,10 +231,12 @@ export function HarnessLandingPage({
     managedWorkspaceLaunch: mode === 'chat' && credentialWorkspace !== null && credentialWorkspace !== undefined,
   })
   const effectiveAgent = launchConfig.effectiveAgent
-  const [uiMode, setUiMode] = useState<'terminal' | 'webpi'>(import.meta.env.VITE_DEMO_MODE ? 'webpi' : 'terminal')
+  const [agentMode, setAgentMode] = useState<'auto' | 'goal'>('auto')
   const selectedInfo = launchConfig.selectedAgent
   const supportsGui = Boolean(selectedInfo?.capabilities.web?.freshSession)
-  const surface = supportsGui ? uiMode : 'terminal'
+  // OpenAlice is GUI-only. The terminal fallback exists solely for a runtime
+  // that has no structured protocol at all; opencode always opens in the GUI.
+  const surface = supportsGui ? 'webpi' : 'terminal'
   const installHint = selectedInfo ? installHintFor(selectedInfo.id) : undefined
   const exampleGroups = mode === 'chat'
     ? chatLandingExampleGroups((key) => t(key as never), project?.product)
@@ -293,10 +287,14 @@ export function HarnessLandingPage({
         launchConfig.launchCredentialSlug,
         effectiveTargetWorkspaceId,
         templateName,
-        launchConfig.launchModel,
-        launchConfig.launchReasoningEffort,
+        // Model and effort are pinned by the opencode Auto/Goal agent configs
+        // (deepseek/deepseek-flash at max effort). The launch composer no
+        // longer exposes either control.
+        undefined,
+        undefined,
         launchConfig.accessMode === 'native' ? 'native' : undefined,
         surface,
+        agentMode,
       )
       void recordSuccessfulUse(effectiveAgent).catch(() => undefined)
       if (mode === 'chat') launchPreferences.adoptRecentChatWorkspace(workspaceId)
@@ -338,11 +336,7 @@ export function HarnessLandingPage({
       welcome={!launching}
       header={showHeader && <PageTopBar title={t(mode === 'chat' ? 'chat.newChat' : mode === 'auto-quant' ? 'autoQuant.newResearch' : 'autoPrediction.newResearch')} />}
       composer={<>
-        <AgentChatComposer
-          config={launchConfig}
-          onConfigureProvider={goConfigureProvider}
-          configurationDisabled={launching}
-          hasWorkspaceTarget={!!credentialWorkspace}
+        <ChatComposer
           value={launching ? '' : value}
           onChange={setValue}
           onSubmit={() => void submit()}
@@ -353,31 +347,24 @@ export function HarnessLandingPage({
           pending={launching}
           disabled={launching}
           sendLabel={t('chatLanding.send')}
-          context={<>
-            <AgentLaunchSelectors
-              ref={launchSelectorsRef}
-              config={launchConfig}
-              onConfigureProvider={goConfigureProvider}
-              showAi={false}
-              menuPlacement="up"
-              toolbar
-            />
-            <DropdownMenu>
-              <DropdownMenuTrigger render={<Button variant="ghost" size="sm" aria-label={`${t('chatLanding.uiMode')}: ${surface === 'webpi' ? 'GUI' : 'TUI'}`} disabled={launching} />}>
-                <LayoutGrid size={14} aria-hidden />
-                <span>{surface === 'webpi' ? 'GUI' : 'TUI'}</span><ChevronDown size={14} aria-hidden />
-              </DropdownMenuTrigger>
-              <DropdownMenuContent side="top" align="start">
-                <DropdownMenuRadioGroup value={surface} onValueChange={value => setUiMode(value as 'terminal' | 'webpi')}>
-                  <DropdownMenuRadioItem value="terminal" closeOnClick>TUI</DropdownMenuRadioItem>
-                  <DropdownMenuRadioItem value="webpi" disabled={!supportsGui} closeOnClick>GUI</DropdownMenuRadioItem>
-                </DropdownMenuRadioGroup>
-              </DropdownMenuContent>
-            </DropdownMenu>
-
-          </>}
-
-          />
+          controls={
+            <fieldset disabled={launching} inert={launching} className="min-w-0 flex-1 disabled:opacity-60">
+              <AgentLaunchSelectors
+                ref={launchSelectorsRef}
+                config={launchConfig}
+                onConfigureProvider={goConfigureProvider}
+                showAi={false}
+                menuPlacement="up"
+                toolbar
+              />
+              <SessionModeSelect
+                value={agentMode}
+                disabled={launching}
+                onChange={(next) => setAgentMode(next === 'goal' ? 'goal' : 'auto')}
+              />
+            </fieldset>
+          }
+        />
 
           {error !== null && (
             <ComposerNotice tone="error" icon={CircleAlert}>

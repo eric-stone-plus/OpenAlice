@@ -1870,6 +1870,10 @@ export const en = {
     launchError: 'Could not start the Workspace Manager.',
     resumeError: 'Could not resume this manager conversation.',
   },
+  sessionMode: {
+    label: 'Session mode',
+    experimental: 'Experimental',
+  },
   chatLanding: {
     startingSession: 'Starting session…',
     uiMode: 'UI mode',

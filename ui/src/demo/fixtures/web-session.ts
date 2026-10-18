@@ -239,6 +239,7 @@ export function createDemoWebSnapshot(seed: DemoWebSeed): WebSessionSnapshot {
     messages: structuredClone(seed.messages),
     streamingMessage: null,
     requests: [],
+    configOptions: [],
     error: null,
     stderrTail: '',
     revision: seed.messages.length,

@@ -25,7 +25,7 @@ describe('opencode runtime flags', () => {
 
     expect(projected.interactiveArgs).toEqual(['--model', 'openai/gpt-5.6-sol']);
     expect(projected.webArgs).toEqual([]);
-    expect(JSON.parse(projected.env['OPENCODE_CONFIG_CONTENT']!)).toEqual({ model: 'openai/gpt-5.6-sol', permission: 'allow' });
+    expect(JSON.parse(projected.env['OPENCODE_CONFIG_CONTENT']!)).toEqual({ model: 'openai/gpt-5.6-sol' });
     expect(projected.headlessArgs).toEqual([
       '--model', 'openai/gpt-5.6-sol',
       '--variant', 'high',
@@ -48,15 +48,25 @@ describe('opencode runtime flags', () => {
 
 it('preserves process config while selecting the ACP model without unsupported flags', () => {
   const projected = opencodeAdapter.sessionRuntime!.project({ cwd: '/workspace', env: { OPENCODE_CONFIG_CONTENT: '{"theme":"system"}' } }, runtime);
-  expect(JSON.parse(projected.env['OPENCODE_CONFIG_CONTENT']!)).toEqual({ theme: 'system', model: 'openai/gpt-5.6-sol', permission: 'allow' });
+  expect(JSON.parse(projected.env['OPENCODE_CONFIG_CONTENT']!)).toEqual({ theme: 'system', model: 'openai/gpt-5.6-sol' });
   expect(opencodeAdapter.composeWebCommand!([], { cwd: '/workspace', env: projected.env, sessionRuntime: projected })).toEqual(['opencode', 'acp']);
 });
 
-
-it('applies full access even without a model override, preserving other process config', () => {
+it('does not inject a permission override without a model override', () => {
   const projected = opencodeAdapter.sessionRuntime!.project(
     { cwd: '/workspace', env: { OPENCODE_CONFIG_CONTENT: '{"theme":"system","permission":"ask"}' } },
     { binding: { version: 1, credential: { source: 'native' } }, ai: null },
   );
-  expect(JSON.parse(projected.env['OPENCODE_CONFIG_CONTENT']!)).toEqual({ theme: 'system', permission: 'allow' });
+  // No app-specific config is projected; the process/terminal config survives
+  // unchanged through the inherited spawn environment.
+  expect(projected.env['OPENCODE_CONFIG_CONTENT']).toBeUndefined();
+});
+
+it('matches the terminal wrapper environment and leaves auto-update enabled', () => {
+  const env = opencodeAdapter.composeEnv!({ cwd: '/workspace', env: {} });
+  expect(env).toEqual({
+    OPENCODE_DISABLE_MODELS_FETCH: '1',
+    OPENCODE_DISABLE_LSP_DOWNLOAD: '1',
+  });
+  expect(env['OPENCODE_DISABLE_AUTOUPDATE']).toBeUndefined();
 });

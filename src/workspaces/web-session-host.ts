@@ -138,6 +138,12 @@ export class WebSessionHost {
     return session.snapshot()
   }
 
+  async configure(recordId: string, configId: string, value: string): Promise<WebSessionSnapshot> {
+    const session = this.require(recordId)
+    await session.configure(configId, value)
+    return session.snapshot()
+  }
+
   async stop(recordId: string, reason = 'stopped'): Promise<boolean> {
     const session = this.sessions.get(recordId)
     if (!session) return false
@@ -231,6 +237,7 @@ class LiveWebSession {
       messages: this.state.messages,
       streamingMessage: this.state.streamingMessage,
       requests: this.state.requests,
+      configOptions: this.state.configOptions,
       error: this.state.error,
       stderrTail: this.stderrTail,
       revision: this.state.revision,
@@ -254,6 +261,12 @@ class LiveWebSession {
       return Promise.reject(new Error('This request does not accept this text answer'))
     }
     return this.transport.respond(requestId, optionId, text)
+  }
+
+  configure(configId: string, value: string): Promise<void> {
+    this.assertLive()
+    if (!this.transport.configure) return Promise.reject(new Error('This runtime does not expose live configuration'))
+    return this.transport.configure(configId, value)
   }
 
   async stop(reason: string): Promise<void> {

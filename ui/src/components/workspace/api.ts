@@ -892,6 +892,21 @@ export type WebSessionPhase =
   | 'stopped'
   | 'failed';
 
+/** One runtime-advertised select (model, effort, session mode/agent, …). */
+export interface WebSessionConfigOption {
+  readonly id: string;
+  readonly name: string;
+  readonly description?: string;
+  readonly category?: string;
+  readonly type: 'select';
+  readonly currentValue: string;
+  readonly options: readonly {
+    readonly value: string;
+    readonly name: string;
+    readonly description?: string;
+  }[];
+}
+
 export interface WebSessionSnapshot {
   readonly recordId: string;
   readonly wsId: string;
@@ -905,6 +920,8 @@ export interface WebSessionSnapshot {
   readonly messages: readonly WebConversationMessage[];
   readonly streamingMessage: WebConversationMessage | null;
   readonly requests: readonly WebPermissionRequest[];
+  /** Runtime-advertised config selects; empty until the transport learns them. */
+  readonly configOptions: readonly WebSessionConfigOption[];
   readonly error: string | null;
   readonly stderrTail: string;
   readonly revision: number;
@@ -921,6 +938,10 @@ export interface SpawnOptions {
    * the adapter's interactive `composeCommand`; ignored when `resume` is set.
    */
   readonly initialPrompt?: string;
+  /** Interactive launch surface. GUI-only OpenAlice sends `webpi`. */
+  readonly surface?: 'terminal' | 'webpi';
+  /** Runtime primary-agent mode (opencode: auto/goal). */
+  readonly agentMode?: 'auto' | 'goal';
 }
 
 /** Secret-free product-Session birth stamp (mirrors backend SessionCreatedBy). */
@@ -1059,6 +1080,8 @@ export async function spawnSession(
   if (opts.resumeId !== undefined) body['resumeId'] = opts.resumeId;
   if (opts.agent !== undefined) body['agent'] = opts.agent;
   if (opts.initialPrompt !== undefined) body['initialPrompt'] = opts.initialPrompt;
+  if (opts.surface !== undefined) body['surface'] = opts.surface;
+  if (opts.agentMode !== undefined) body['agentMode'] = opts.agentMode;
   const res = await fetch(
     `/api/workspaces/${encodeURIComponent(id)}/sessions/spawn`,
     {
@@ -1296,10 +1319,12 @@ export async function quickChat(
   model?: string | null,
   reasoningEffort?: ModelReasoningEffort,
   credentialSource?: 'native',
-      surface?: 'terminal' | 'webpi',
+  surface?: 'terminal' | 'webpi',
+  agentMode?: 'auto' | 'goal',
 ): Promise<QuickChatResult> {
   const body: Record<string, unknown> = { prompt };
   if (surface) body['surface'] = surface;
+  if (agentMode) body['agentMode'] = agentMode;
   if (credentialSource !== undefined) body['credentialSource'] = credentialSource;
   if (agent !== undefined) body['agent'] = agent;
   if (credentialSlug !== undefined) body['credentialSlug'] = credentialSlug;
@@ -1481,6 +1506,16 @@ export async function respondWebSession(
   text?: string,
 ): Promise<WebSessionSnapshot> {
   return webSessionMutation(webSessionUrl(wsId, sessionId, '/respond'), 'respond', { requestId, optionId, ...(text !== undefined ? { text } : {}) });
+}
+
+/** Change one runtime-advertised select (opencode: mode=auto|goal). */
+export async function configureWebSession(
+  wsId: string,
+  sessionId: string,
+  configId: string,
+  value: string,
+): Promise<WebSessionSnapshot> {
+  return webSessionMutation(webSessionUrl(wsId, sessionId, '/config'), 'config', { configId, value });
 }
 
 /** Remove a conversation from the active floor (kills its process first). */

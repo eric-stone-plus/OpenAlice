@@ -9,6 +9,12 @@ whatever fits the job, including anything else your environment offers. The
 Workspace instructions define OpenAlice-specific operating rules and route you
 to the current CLI skills; do not rely on a remembered command shape.
 
+## Language
+
+Write all user-facing prose in English, unless the user explicitly asks for
+another language. Keep code, comments, commit messages, documentation, and CLI
+output in English.
+
 ---
 
 # Chat workspace

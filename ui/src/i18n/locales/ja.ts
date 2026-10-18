@@ -1837,6 +1837,10 @@ export const ja: Resources = {
     launchError: 'ワークスペース管理者を起動できませんでした。',
     resumeError: 'この管理者会話を再開できませんでした。',
   },
+  sessionMode: {
+    label: 'セッションモード',
+    experimental: '実験的',
+  },
   chatLanding: {
     startingSession: 'セッションを起動中…',
     uiMode: 'UI モード',

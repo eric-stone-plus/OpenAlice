@@ -2,7 +2,7 @@ import { parseMarketReference } from '@traderalice/connector-protocol'
 import { ConversationImagePreview } from '../conversation/ConversationImagePreview'
 import { useConversationFiles } from '../../hooks/useConversationFiles'
 import { useHarnessWorkbench } from '../../live/harness-workbench'
-import { useCallback, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useMemo, type ReactNode } from 'react'
 import { LoaderCircle } from 'lucide-react'
 import { PageTopBar } from '../PageTopBar'
 import { ConversationView } from '../conversation/ConversationView'
@@ -38,7 +38,6 @@ export function WebSessionView(props: Props) {
 }
 
 function WebSession({ readOnly = false, record, wsId, sessionId, agent, agents, label, headerActions, onSessionLost }: Props) {
-  const [configurationReady, setConfigurationReady] = useState(true)
   const session = useWebConversation(wsId, sessionId, readOnly)
   const { snapshot, busy, requests } = session
   const openFile = useCallback((path: string) => {
@@ -77,11 +76,13 @@ function WebSession({ readOnly = false, record, wsId, sessionId, agent, agents, 
       items={session.items}
       revision={snapshot?.revision ?? 0}
       busy={!readOnly && busy}
-      ready={!readOnly && !!snapshot && snapshot.phase !== 'failed' && snapshot.phase !== 'starting' && !stopped && !session.reconfiguring && configurationReady}
+      ready={!readOnly && !!snapshot && snapshot.phase !== 'failed' && snapshot.phase !== 'starting' && !stopped && !session.reconfiguring}
       placeholder={`Message ${agentLabel}…`}
       empty={snapshot ? 'What should Alice work on next?' : 'Opening conversation…'}
-      renderComposer={record && agents ? composer => <WebSessionComposer composer={composer} workspaceId={wsId} record={record} agents={agents}
-        busy={readOnly || busy || session.reconfiguring || !snapshot || snapshot.phase === 'starting'} reconfigure={session.reconfigure} onReadyChange={setConfigurationReady} /> : undefined}
+      renderComposer={record && agents ? composer => <WebSessionComposer composer={composer}
+        configOptions={snapshot?.configOptions}
+        busy={readOnly || busy || session.reconfiguring || !snapshot || snapshot.phase === 'starting'}
+        onConfigure={session.configure} /> : undefined}
       status={<>
         {session.reconfiguring && <div role="status" className="px-3 py-1 text-xs text-muted-foreground">Applying AI configuration…</div>}
 

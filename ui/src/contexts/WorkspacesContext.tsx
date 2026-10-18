@@ -275,7 +275,15 @@ export function WorkspacesProvider({ children, renderContent }: { children: Reac
     async (wsId: string, opts: SpawnOpts = {}, source?: WorkspaceSource): Promise<void> => {
       try {
         await ensureTerminalAppearancePublished()
-        const sess = await spawnSession(wsId, opts)
+        // OpenAlice is GUI-only for its agent runtime. New opencode Sessions
+        // start in the structured Web surface; non-agent utility runtimes keep
+        // their terminal.
+        const sess = await spawnSession(wsId, {
+          ...opts,
+          ...(opts.surface === undefined && (opts.agent ?? 'opencode') === 'opencode'
+            ? { surface: 'webpi' as const }
+            : {}),
+        })
         const nowIso = new Date().toISOString()
         const newRecord: SessionRecord = {
           id: sess.sessionId,
@@ -443,6 +451,7 @@ export function WorkspacesProvider({ children, renderContent }: { children: Reac
       reasoningEffort?: import('../api').ModelReasoningEffort,
       credentialSource?: 'native',
       surface?: 'terminal' | 'webpi',
+      agentMode?: 'auto' | 'goal',
     ): Promise<string> => {
       await ensureTerminalAppearancePublished()
       const { workspace, session } = await apiQuickChat(
@@ -455,6 +464,7 @@ export function WorkspacesProvider({ children, renderContent }: { children: Reac
         reasoningEffort,
         credentialSource,
         surface,
+        agentMode,
       )
       if (session.surface === 'webpi') setLaunchPreview(workspace.id, session.sessionId, prompt)
       const nowIso = new Date().toISOString()

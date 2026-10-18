@@ -115,11 +115,25 @@ export function WorkspaceView(props: WorkspaceViewProps): ReactElement {
                     onSessionLost={props.onSessionLost}
                     headerActions={props.terminalHeaderActions}
                   />
+                ) : s.agent === 'opencode' ? (
+                  // OpenAlice no longer exposes the opencode TUI. A legacy PTY
+                  // record is converted to the GUI by WorkspacePage; show a
+                  // transition state instead of flashing the terminal.
+                  <div role="status" className="flex h-full items-center justify-center gap-2 text-sm text-muted-foreground">
+                    Opening GUI…
+                    <button
+                      type="button"
+                      className="text-primary hover:underline"
+                      onClick={() => { void props.onOpenWeb(s.id) }}
+                    >
+                      Retry
+                    </button>
+                  </div>
                 ) : (
                   <TerminalView
                     wsId={props.wsId}
                     sessionId={s.id}
-                    renderer={s.agent === 'opencode' ? 'dom' : 'auto'}
+                    renderer="auto"
                     {...(props.label !== undefined ? { label: props.label } : {})}
                     sessionLabel={sessionCoworkerLabel(s)}
                     headerActions={props.terminalHeaderActions}

@@ -8,7 +8,18 @@ const { autoUpdater } = electronUpdater
 
 type UpdateCheckResult =
   | { supported: true }
-  | { supported: false; reason: 'not-packaged' | 'missing-config' }
+  | { supported: false; reason: 'not-packaged' | 'missing-config' | 'feed-unavailable' }
+
+/**
+ * A locally built Linux package has no published beta feed yet, so
+ * electron-updater throws `Cannot find channel "beta-linux-yml"` (HTTP 404).
+ * That is an expected capability gap, not a failed update check; report it as
+ * unsupported instead of surfacing the raw HttpError in the App details dialog.
+ */
+function isMissingUpdateFeedError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error)
+  return /Cannot find channel|HttpError:\s*404|status code 404/i.test(message)
+}
 
 export interface AutoUpdateHooks {
   beforeInstall: (
@@ -28,6 +39,7 @@ export function configureAutoUpdate(win: BrowserWindow, hooks: AutoUpdateHooks, 
   let activeCheck: Promise<UpdateCheckResult> | null = null
   let installInProgress = false
   let installFailureHandled = false
+  let missingFeed = false
   const capability = resolveAutoUpdateCapability({
     isPackaged: app.isPackaged,
     resourcesPath: process.resourcesPath,
@@ -73,10 +85,15 @@ export function configureAutoUpdate(win: BrowserWindow, hooks: AutoUpdateHooks, 
     if (activeCheck) return activeCheck
     checkedRelease = null
     installFailureHandled = false
+    missingFeed = false
     sendStatus({ phase: 'checking' })
     activeCheck = autoUpdater.checkForUpdates()
       .then(() => ({ supported: true as const }))
       .catch((err: unknown) => {
+        if (missingFeed || isMissingUpdateFeedError(err)) {
+          missingFeed = true
+          return { supported: false as const, reason: 'feed-unavailable' as const }
+        }
         const message = err instanceof Error ? err.message : String(err)
         if (latestStatus?.phase !== 'error' || latestStatus.message !== message) {
           sendStatus({ phase: 'error', message })
@@ -95,7 +112,13 @@ export function configureAutoUpdate(win: BrowserWindow, hooks: AutoUpdateHooks, 
   const controls = { install: (expectedVersion?: string, parentOperationId?: string) => install(expectedVersion, parentOperationId), downloaded: () => downloadedVersion, discover: async (): Promise<ClientReleaseObservation> => {
     const result = await checkForUpdates()
     const base = { currentVersion, channel: !app.isPackaged ? 'dev' : channel ?? 'custom' }
-    if (!result.supported) return { ...base, status: 'unsupported', message: result.reason }
+    if (!result.supported) return {
+      ...base,
+      status: 'unsupported',
+      message: result.reason === 'feed-unavailable'
+        ? 'No update feed is published for this Linux build.'
+        : result.reason,
+    }
     if (latestStatus?.phase === 'error') throw new Error(latestStatus.message)
     if (!checkedRelease) throw new Error('Native updater returned no release identity')
     return { ...base, ...checkedRelease.decision,
@@ -172,6 +195,10 @@ export function configureAutoUpdate(win: BrowserWindow, hooks: AutoUpdateHooks, 
     const normalized = err instanceof Error ? err : new Error(String(err))
     if (installInProgress) {
       void reportInstallFailure(normalized)
+      return
+    }
+    if (isMissingUpdateFeedError(normalized)) {
+      missingFeed = true
       return
     }
     sendStatus({ phase: 'error', message: normalized.message })

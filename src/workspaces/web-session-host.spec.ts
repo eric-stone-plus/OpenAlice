@@ -215,7 +215,20 @@ describe('WebSessionHost with the pi-rpc transport', () => {
 
 // ── acp ────────────────────────────────────────────────────────────────────
 
+function acpConfig(mode = 'auto') {
+  return [
+    {
+      id: 'mode', name: 'Session Mode', category: 'mode', type: 'select', currentValue: mode,
+      options: [
+        { value: 'auto', name: 'Auto', description: 'Fast, direct execution' },
+        { value: 'goal', name: 'Goal', description: 'Delivery closure with the swarm playbook' },
+      ],
+    },
+  ]
+}
+
 function acpProcess(options: { loadSession?: boolean; failAuth?: boolean } = {}): FakeProcess {
+  let mode = 'auto'
   return new FakeProcess((command, self) => {
     const id = command['id']
     const method = command['method']
@@ -229,14 +242,19 @@ function acpProcess(options: { loadSession?: boolean; failAuth?: boolean } = {})
         self.line({ jsonrpc: '2.0', id, error: { code: -32000, message: 'Authentication required' } })
         return
       }
-      self.line({ jsonrpc: '2.0', id, result: { sessionId: 'ses_new' } })
+      self.line({ jsonrpc: '2.0', id, result: { sessionId: 'ses_new', configOptions: acpConfig(mode) } })
+      return
+    }
+    if (method === 'session/set_config_option') {
+      if (params['configId'] === 'mode') mode = String(params['value'])
+      self.line({ jsonrpc: '2.0', id, result: { configOptions: acpConfig(mode) } })
       return
     }
     if (method === 'session/load') {
       self.line({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: params['sessionId'], update: { sessionUpdate: 'user_message_chunk', content: { type: 'text', text: 'earlier ' } } } })
       self.line({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: params['sessionId'], update: { sessionUpdate: 'user_message_chunk', content: { type: 'text', text: 'question' } } } })
       self.line({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: params['sessionId'], update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'earlier answer' } } } })
-      self.line({ jsonrpc: '2.0', id, result: {} })
+      self.line({ jsonrpc: '2.0', id, result: { configOptions: acpConfig(mode) } })
       return
     }
     if (method === 'session/prompt') {
@@ -340,6 +358,24 @@ describe('WebSessionHost with the acp transport', () => {
     const started = await host.start({ ...acpInput, nativeSessionId: 'ses_old' })
     expect(started.nativeSessionId).toBe('ses_old')
     expect(texts(started)).toEqual(['user:earlier question', 'assistant:earlier answer'])
+  })
+
+  it('exposes runtime config options and applies the Auto/Goal mode', async () => {
+    const process = acpProcess()
+    const host = new WebSessionHost(logger, {}, () => process as never)
+    const started = await host.start({ ...acpInput, agentMode: 'goal' })
+    expect(started.configOptions).toEqual([
+      expect.objectContaining({ id: 'mode', currentValue: 'goal' }),
+    ])
+    expect(process.received).toContainEqual(expect.objectContaining({
+      method: 'session/set_config_option',
+      params: expect.objectContaining({ configId: 'mode', value: 'goal' }),
+    }))
+    const switched = await host.configure('record-1', 'mode', 'auto')
+    expect(switched.configOptions).toEqual([
+      expect.objectContaining({ id: 'mode', currentValue: 'auto' }),
+    ])
+    await host.stopAll()
   })
 
   it('cancels outstanding permission requests when the turn is aborted', async () => {
