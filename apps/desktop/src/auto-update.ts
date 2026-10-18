@@ -17,8 +17,13 @@ type UpdateCheckResult =
  * unsupported instead of surfacing the raw HttpError in the App details dialog.
  */
 function isMissingUpdateFeedError(error: unknown): boolean {
+  if (process.platform !== 'linux') return false
   const message = error instanceof Error ? error.message : String(error)
-  return /Cannot find channel|HttpError:\s*404|status code 404/i.test(message)
+  // Require the Linux beta channel identity as well as a 404/channel error, so
+  // an unrelated release-asset 404 is reported as a real update failure. The
+  // feed is named `beta-linux.yml`; older electron-updater messages use the
+  // hyphenated channel form `beta-linux-yml`.
+  return /beta-linux[.-]yml/i.test(message) && /Cannot find channel|HttpError|404/i.test(message)
 }
 
 export interface AutoUpdateHooks {
@@ -197,7 +202,9 @@ export function configureAutoUpdate(win: BrowserWindow, hooks: AutoUpdateHooks, 
       void reportInstallFailure(normalized)
       return
     }
-    if (isMissingUpdateFeedError(normalized)) {
+    // Suppress only a missing feed discovered by an active check. A 404 while
+    // downloading an accepted release is a real failure and must stay visible.
+    if (activeCheck && isMissingUpdateFeedError(normalized)) {
       missingFeed = true
       return
     }

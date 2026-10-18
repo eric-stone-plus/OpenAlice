@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { PageTopBar } from '../components/PageTopBar'
 import {
@@ -15,6 +15,7 @@ import '@xterm/xterm/css/xterm.css'
 
 import {
   MANAGER_WORKSPACE_ID,
+  agentSupportsWeb,
 } from '../components/workspace/api'
 import {
   AgentLaunchDetails,
@@ -73,6 +74,21 @@ export function WorkspaceManagerPage({ spec, visible = true }: { spec: ManagerSp
   const session = sessionId
     ? manager?.sessions.find((candidate) => candidate.id === sessionId) ?? null
     : null
+  const convertingToWeb = useRef<string | null>(null)
+
+  // The manager quick-start seam still allocates a native Session. OpenAlice is
+  // GUI-only, so a web-capable Session is moved to the structured surface on
+  // first open and never rendered as a terminal.
+  useEffect(() => {
+    if (!session || session.state !== 'running' || session.surface === 'webpi') return
+    if (!agentSupportsWeb(agents, session.agent)) return
+    if (convertingToWeb.current === session.id) return
+    convertingToWeb.current = session.id
+    void Promise.resolve(openWebSession(MANAGER_WORKSPACE_ID, session.id)).catch((cause) => {
+      convertingToWeb.current = null
+      console.error('workspaceManager.gui_migration_failed', cause)
+    })
+  }, [agents, openWebSession, session])
 
   const suggestions = useMemo(() => [
     t('workspaceManager.suggestionAudit'),
@@ -135,9 +151,15 @@ export function WorkspaceManagerPage({ spec, visible = true }: { spec: ManagerSp
 
   if (sessionId && session) {
     if (session?.state === 'running') connectedSessions.current.add(session.id)
+    const webCapable = agentSupportsWeb(agents, session.agent)
+    const converting =
+      session.state === 'running' &&
+      (session.surface ?? 'terminal') === 'terminal' &&
+      webCapable
     const terminalCanvas =
       session.state === 'running' &&
-      (session.surface ?? 'terminal') === 'terminal'
+      (session.surface ?? 'terminal') === 'terminal' &&
+      !webCapable
     const webCanvas = session.state === 'running' && session.surface === 'webpi'
     const backButton = (
       <Button
@@ -155,7 +177,7 @@ export function WorkspaceManagerPage({ spec, visible = true }: { spec: ManagerSp
     const runtimeBadge = (
       <span className="inline-flex items-center gap-1.5 rounded-full border border-border/70 bg-background px-2 py-1 text-[10px] leading-[14px] font-medium text-muted-foreground">
         <AgentRuntimeIcon agentId={session.agent} className="h-[11px] w-[11px]" />
-        {runtimeLabel(session.agent, agents)} {session.surface === 'webpi' ? 'Web' : 'TUI'}
+        {runtimeLabel(session.agent, agents)} {webCapable ? 'Web' : 'TUI'}
       </span>
     )
 
@@ -185,6 +207,11 @@ export function WorkspaceManagerPage({ spec, visible = true }: { spec: ManagerSp
               headerActions={<>{backButton}{runtimeBadge}</>}
               onSessionLost={() => void refreshWorkspaceManager()}
             />
+          ) : converting ? (
+            <div role="status" className="flex h-full min-h-[240px] items-center justify-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="size-4 animate-spin" aria-hidden />
+              {t('workspaceManager.openingGui', { defaultValue: 'Opening GUI…' })}
+            </div>
           ) : (
             <TerminalView
               wsId={MANAGER_WORKSPACE_ID}

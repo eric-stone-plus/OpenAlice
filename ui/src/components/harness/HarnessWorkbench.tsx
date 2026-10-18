@@ -122,10 +122,7 @@ function WorkPanel({ wsId, source, onCollapse }: { wsId: string; source: Workspa
           <DropdownMenuItem onClick={() => openTab(wsId, { kind: 'browser', id: `browser:${Date.now()}-${Math.random().toString(36).slice(2)}` })}><Globe size={14} />{t('workbench.browser')}</DropdownMenuItem>
           <DropdownMenuItem onClick={() => openTab(wsId, { kind: 'files', id: 'files' })}><Folder size={14} />{t('workspace.files')}</DropdownMenuItem>
           {(source !== 'chat' || import.meta.env.VITE_DEMO_MODE) && <DropdownMenuItem onClick={() => openTab(wsId, { kind: 'studio', id: 'studio' })}><PanelsTopLeft size={14} />{t('harnessSurface.studio')}</DropdownMenuItem>}
-          {canSwitch && session && <DropdownMenuItem onClick={() => {
-            if (session.surface === 'webpi') void ctx.resumeSession(wsId, session.id, source)
-            else void ctx.openWebSession(wsId, session.id, source)
-          }}>{session.surface === 'webpi' ? 'Open TUI' : 'Web Beta'}</DropdownMenuItem>}
+          {canSwitch && session && session.surface !== 'webpi' && <DropdownMenuItem onClick={() => void ctx.openWebSession(wsId, session.id, source)}>Web Beta</DropdownMenuItem>}
         </DropdownMenuContent>
       </DropdownMenu>
       <Button variant="ghost" size="icon" className="harness-work-collapse" onClick={onCollapse} aria-label={t('workbench.collapse', { defaultValue: 'Return to conversation / collapse panel' })}><PanelRightClose size={16} /></Button>

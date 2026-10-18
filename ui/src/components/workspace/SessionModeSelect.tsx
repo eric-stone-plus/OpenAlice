@@ -39,7 +39,7 @@ export function SessionModeSelect({ value, options = SESSION_MODE_OPTIONS, disab
   readonly onChange?: (value: string) => void
 }) {
   const { t } = useTranslation()
-  const active = options.find((option) => option.value === value) ?? options[0]
+  const active = options.find((option) => option.value === value)
   return (
     <DropdownMenu>
       <DropdownMenuTrigger

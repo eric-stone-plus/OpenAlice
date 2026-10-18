@@ -2741,9 +2741,10 @@ export function createWorkspaceRoutes(
     }
   });
 
-  // Change one runtime-advertised select on a live Web session. OpenAlice uses
-  // this for the Auto/Goal agent mode; the transport validates the id/value
-  // against the options the runtime itself advertised.
+  // Change the Auto/Goal session mode on a live Web session. OpenAlice pins
+  // the model and effort, so this endpoint admits only mode=auto|goal; the
+  // transport re-validates the value against the options the runtime itself
+  // advertised.
   app.post('/:id/sessions/:sid/web/config', async (c) => {
     const ctx = webSessionContext(c);
     if (!ctx) return c.json({ error: 'not_found' }, 404);
@@ -2753,6 +2754,9 @@ export function createWorkspaceRoutes(
     const value = fields['value'];
     if (typeof configId !== 'string' || !configId || typeof value !== 'string' || !value) {
       return c.json({ error: 'bad_request', message: 'configId and value are required' }, 400);
+    }
+    if (configId !== 'mode' || (value !== 'auto' && value !== 'goal')) {
+      return c.json({ error: 'bad_request', message: 'only the Auto/Goal session mode is configurable' }, 400);
     }
     try {
       const snapshot = await svc.web.configure(ctx.token, configId, value);

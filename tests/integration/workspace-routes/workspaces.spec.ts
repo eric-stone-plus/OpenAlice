@@ -1697,6 +1697,7 @@ describe('Web surface routes', () => {
       prompt: vi.fn(async () => ({ ...snapshot, phase: 'working' })),
       abort: vi.fn(async () => snapshot),
       respond: vi.fn(async () => ({ ...snapshot, requests: [] })),
+      configure: vi.fn(async () => snapshot),
     };
     const svc = {
       registry: { get: () => ({ id: 'ws-1', dir: '/w' }) },
@@ -1809,6 +1810,19 @@ describe('Web surface routes', () => {
     expect(web.respond).toHaveBeenCalledWith(TOKEN, 'q1', '', 'Alice');
     const invalid = await post(app, `/ws-1/sessions/${TOKEN}/web/respond`, { requestId: 'q1', optionId: '', text: 123 });
     expect(invalid.status).toBe(400);
+  });
+
+  it('applies only the Auto/Goal mode to a live Web session', async () => {
+    const { app, web } = buildWeb();
+    const ok = await post(app, `/ws-1/sessions/${TOKEN}/web/config`, { configId: 'mode', value: 'goal' });
+    expect(ok.status).toBe(200);
+    expect(web.configure).toHaveBeenCalledWith(TOKEN, 'mode', 'goal');
+
+    const effort = await post(app, `/ws-1/sessions/${TOKEN}/web/config`, { configId: 'effort', value: 'none' });
+    expect(effort.status).toBe(400);
+    const build = await post(app, `/ws-1/sessions/${TOKEN}/web/config`, { configId: 'mode', value: 'build' });
+    expect(build.status).toBe(400);
+    expect(web.configure).toHaveBeenCalledTimes(1);
   });
 
   it('returns a tiny unchanged response when the browser already has the revision', async () => {

@@ -74,7 +74,15 @@ export class AcpTransport implements WebSessionTransport {
       throw describeAcpFailure(error, this.ctx.input.agent)
     }
     this.ctx.state.setNativeSessionId(this.sessionId)
-    if (this.ctx.input.agentMode) await this.configure('mode', this.ctx.input.agentMode)
+    // Only apply the OpenAlice mode when the runtime actually advertises it.
+    // Cursor/Grok ACP sessions expose model/effort but no mode option; sending
+    // one anyway would fail session startup with an unknown-config-option error.
+    const requestedMode = this.ctx.input.agentMode
+    const modeOffered = requestedMode
+      ? this.ctx.state.configOptions.some((option) => option.id === 'mode'
+        && option.options.some((entry) => entry.value === requestedMode))
+      : false
+    if (requestedMode && modeOffered) await this.configure('mode', requestedMode)
     this.ctx.state.setPhase('idle')
   }
 
@@ -104,6 +112,11 @@ export class AcpTransport implements WebSessionTransport {
 
   async configure(configId: string, value: string): Promise<void> {
     if (!this.sessionId) throw new Error('ACP session is not established')
+    const option = this.ctx.state.configOptions.find((entry) => entry.id === configId)
+    if (!option) throw new Error(`config option ${configId} is not offered by ${this.ctx.input.agent}`)
+    if (!option.options.some((entry) => entry.value === value)) {
+      throw new Error(`value ${value} is not offered for config option ${configId}`)
+    }
     const result = await this.peer.request('session/set_config_option', {
       sessionId: this.sessionId,
       configId,

@@ -59,4 +59,18 @@ describe('withSupervisorConfigLock', () => {
       .rejects.toThrow(/Supervisor config is busy/)
     expect(await readFile(lockPath, 'utf8')).toBe(owner)
   })
+
+  it('does not remove a successor lock when releasing', async () => {
+    const successor = JSON.stringify({
+      pid: process.pid,
+      hostname: hostname(),
+      acquiredAt: new Date().toISOString(),
+      token: 'successor-token',
+    })
+    await withSupervisorConfigLock(root, async () => {
+      // Simulate the lock being replaced while the transaction runs.
+      await writeFile(lockPath, successor)
+    })
+    expect(await readFile(lockPath, 'utf8')).toBe(successor)
+  })
 })

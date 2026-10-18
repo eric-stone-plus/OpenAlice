@@ -1,13 +1,13 @@
 import type { ChatComposerProps } from '../conversation/ChatComposer'
 import { ChatComposer } from '../conversation/ChatComposer'
 import type { WebSessionConfigOption } from './api'
-import { SESSION_MODE_OPTIONS, SessionModeSelect } from './SessionModeSelect'
+import { SessionModeSelect } from './SessionModeSelect'
 
 /**
  * Composer for a live GUI conversation. Model and effort are intentionally
  * absent: both Auto and Goal are opencode primary agents pinned to
- * deepseek-flash at max effort. The only runtime choice is the session mode,
- * which is an experimental OpenAlice surface for now.
+ * deepseek-flash at max effort. Only runtimes that advertise a mode select get
+ * the experimental Auto/Goal switch.
  */
 export function WebSessionComposer(props: {
   composer: ChatComposerProps
@@ -16,7 +16,7 @@ export function WebSessionComposer(props: {
   onConfigure?: (configId: string, value: string) => Promise<void> | void
 }) {
   const mode = props.configOptions?.find((option) => option.id === 'mode')
-  const advertised = mode
+  const options = mode
     ? mode.options
         .filter((option) => option.value === 'auto' || option.value === 'goal')
         .map((option) => ({
@@ -25,7 +25,7 @@ export function WebSessionComposer(props: {
           ...(option.description ? { description: option.description } : {}),
         }))
     : []
-  const options = advertised.length > 0 ? advertised : SESSION_MODE_OPTIONS
+  if (options.length === 0) return <ChatComposer {...props.composer} />
   return (
     <ChatComposer
       {...props.composer}
@@ -34,7 +34,11 @@ export function WebSessionComposer(props: {
           value={mode?.currentValue ?? 'auto'}
           options={options}
           disabled={props.busy}
-          onChange={(value) => { void props.onConfigure?.('mode', value) }}
+          onChange={(value) => {
+            void Promise.resolve(props.onConfigure?.('mode', value)).catch((error) => {
+              console.error('web_session.configure_failed', error)
+            })
+          }}
         />
       )}
     />

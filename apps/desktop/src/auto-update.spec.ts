@@ -100,7 +100,7 @@ describe('configureAutoUpdate', () => {
     mocks.app.isPackaged = true
     mocks.capability = { enabled: true, configPath: '/opt/OpenAlice/resources/app-update.yml' }
     mocks.autoUpdater.checkForUpdates.mockRejectedValue(
-      new Error('Cannot find channel "beta-linux-yml" update info: HttpError: 404 Not Found'),
+      new Error('Cannot find channel "beta-linux.yml" update info: HttpError: 404 Not Found'),
     )
 
     const controls = configureAutoUpdate({
@@ -114,6 +114,20 @@ describe('configureAutoUpdate', () => {
       currentVersion: '0.95.0-beta',
       channel: 'beta',
     })
+  })
+
+  it('does not hide an unrelated 404 as an unsupported Linux build', async () => {
+    mocks.app.isPackaged = true
+    mocks.capability = { enabled: true, configPath: '/opt/OpenAlice/resources/app-update.yml' }
+    mocks.autoUpdater.checkForUpdates.mockRejectedValue(new Error('HttpError: 404 Not Found'))
+    const send = vi.fn()
+    const controls = configureAutoUpdate({
+      isDestroyed: () => false,
+      webContents: { send },
+    } as never, { beforeInstall: vi.fn(async () => {}) }, '0.95.0-beta')
+
+    await expect(controls.discover()).rejects.toThrow(/404/)
+    expect(send).toHaveBeenCalledWith('openalice:updater:status', expect.objectContaining({ phase: 'error' }))
   })
 
   it('deduplicates owner discovery without exposing a second check IPC', async () => {

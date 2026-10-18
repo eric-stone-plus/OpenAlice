@@ -176,10 +176,10 @@ Web shutdown waits for child termination, including the SIGKILL fallback, before
 another writer may start. The UI renders background occupancy without attaching
 a terminal to a headless Session.
 
-Quick Start exposes a TUI / GUI selector beside the runtime. GUI is available
-only with `web.freshSession`; `quick-chat` accepts `surface: webpi` and starts
-the structured host directly with the same Session runtime binding. Omission
-keeps the terminal default. The initial prompt is sent once after Web startup.
+Quick Start exposes only the runtime picker and the experimental Auto/Goal mode
+selector. GUI is required for opencode (`web.freshSession`); `quick-chat` starts
+the structured host directly with the same Session runtime binding. The desktop
+no longer offers a TUI surface. The initial prompt is sent once after Web startup.
 
 ## File references in GUI prose
 
@@ -230,13 +230,13 @@ text growth only while the reader remains near the bottom.
 
 ### Shared Start and GUI composer
 
-`AgentChatComposer` owns the common `ChatComposer` input/actions and the combined
-AI access/model/effort menu. Start supplies runtime and surface selection in the
-context slot and follows the sidebar Workspace target; it has no Workspace
-picker. GUI shows its fixed runtime identity in the top bar beside surface
-switching, without a composer context tray. Its `useWebSessionModelConfig` uses
-the existing pinned runtime draft and unified model catalog hook, never launch
-preferences. Selecting AI configuration restarts the same Session via `/web/open`.
+`ChatComposer` owns the common input/actions. Start supplies the runtime picker
+and the Auto/Goal mode selector in the controls row and follows the sidebar
+Workspace target; it has no Workspace picker. Model and effort are fixed
+(deepseek-flash at max effort) and are not exposed in the composer. GUI shows
+its fixed runtime identity in the top bar, without a composer context tray. The
+mode selector appears only when the runtime advertises an Auto/Goal select; a
+live `POST /web/config` request is limited to `mode=auto|goal`.
 Sending and configuration are locked during restart; the mounted composer keeps
 its draft and transcript. `useWebConversation` invalidates in-flight polls and
 accepts the restarted process's new revision sequence. No persisted shape changes.
