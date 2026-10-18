@@ -10,8 +10,10 @@ import { createCompanionSoundStore, DEFAULT_SOUND, type CompanionSound } from '.
 
 /** Keep the renderer viewport dimensions stable across native window frames. */
 export function resizeCompanionWindow(window: BrowserWindow, width: number, height: number): void {
+  // X11 ignores setSize on a non-resizable window, so resize through the same
+  // bounds path the native size menu uses.
   if (process.platform === 'win32') window.setContentSize(width, height)
-  else window.setSize(width, height)
+  else window.setBounds({ ...window.getBounds(), width, height })
 }
 
 /** Move and size in the same coordinate space used by the renderer. */
