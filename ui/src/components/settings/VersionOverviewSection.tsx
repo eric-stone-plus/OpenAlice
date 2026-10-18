@@ -80,10 +80,10 @@ export function VersionOverviewSection() {
       : backend?.updateAuthority === 'none' ? t('settings.about.status.noUpdater')
         : backend?.updateAuthority === 'source' ? text('sourceManaged') : backend?.decision?.status === 'current' ? text('current') : text('unknown')
   const row = (kind: 'app' | 'backend' | 'project', icon: ReactNode, subtitle: string, identity: string, status: string, available: boolean, action: () => void, children?: ReactNode) => <section id={`settings-version-${kind}`} tabIndex={-1} className="min-w-0 scroll-mt-5 outline-none focus-visible:[box-shadow:var(--oa-focus-shadow)]">
-    <div className="grid grid-cols-[1.5rem_minmax(0,1fr)] items-center gap-x-3 gap-y-3 px-4 py-5 sm:grid-cols-[1.5rem_minmax(0,1fr)_auto] sm:px-5">
+    <div className="grid grid-cols-[1.5rem_minmax(0,1fr)] items-center gap-x-3 gap-y-3 px-4 py-5 sm:grid-cols-[1.5rem_minmax(0,1fr)_minmax(0,22rem)] sm:px-5">
       <div className={`self-start pt-0.5 ${available ? 'text-primary' : 'text-muted-foreground'}`} aria-hidden>{icon}</div>
       <div className="min-w-0"><h3 className="text-sm font-semibold">{text(kind)}</h3><p className="mt-1 break-words text-xs text-muted-foreground">{subtitle}</p></div>
-      <div className="col-start-2 flex flex-wrap items-center gap-x-4 gap-y-2 sm:col-start-3 sm:row-start-1">
+      <div className="col-start-2 flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2 sm:col-start-3 sm:row-start-1 sm:justify-end">
         {identity && <span className="text-xs tabular-nums">{identity}</span>}
         <span className={`flex items-center gap-1.5 text-xs ${available ? 'text-primary' : status === text('needsAttention') || status === text('checkFailed') ? 'text-warning' : 'text-muted-foreground'}`}><span className={`size-1.5 shrink-0 rounded-full ${available ? 'bg-primary' : status === text('current') ? 'bg-success' : 'bg-current'}`} aria-hidden />{status}</span>
         {(available || (kind === 'project' && activeOperation)) && <Button size="sm" onClick={action}>{activeOperation && kind === 'project' ? text('viewProgress') : text('viewUpdate')}</Button>}

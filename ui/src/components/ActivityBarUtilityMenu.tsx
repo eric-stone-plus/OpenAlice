@@ -1,4 +1,3 @@
-import alicePet from '../assets/alice-pet-avatar.png'
 import { Ellipsis, Laptop, Moon, Plug, Settings, Sun, Ghost } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -77,9 +76,6 @@ export function ActivityBarUtilityMenu({
           />
         )}
       >
-        <span aria-hidden className={`${denseRail ? 'size-6' : 'size-7'} flex shrink-0 items-center justify-center overflow-hidden rounded-full border border-sidebar-foreground/15 bg-sidebar-accent/60 p-0.5`}>
-          <img src={alicePet} alt="" draggable={false} className="size-full object-cover" />
-        </span>
         {!compactRail && (
           <span className="min-w-0 flex-1 truncate text-[14px] font-medium">{t('nav.yourAlice')}</span>
         )}
@@ -92,8 +88,8 @@ export function ActivityBarUtilityMenu({
             className={`h-1.5 w-1.5 shrink-0 rounded-full bg-warning ${compactRail ? 'absolute -bottom-0.5 -right-0.5' : ''}`}
           />
         )}
-        {!compactRail && <Ellipsis size={16} strokeWidth={1.75} aria-hidden
-          className="oa-application-menu-more shrink-0 text-muted-foreground" />}
+        <Ellipsis size={16} strokeWidth={1.75} aria-hidden
+          className={`shrink-0 text-muted-foreground ${compactRail ? '' : 'oa-application-menu-more'}`} />
       </DropdownMenuTrigger>
 
       <DropdownMenuContent

@@ -1,4 +1,3 @@
-import alicePet from '../assets/alice-pet-avatar.png'
 // @vitest-environment jsdom
 
 import { cleanup, render, screen } from '@testing-library/react'
@@ -52,7 +51,7 @@ afterEach(() => {
 })
 
 describe('ActivityBarUtilityMenu', () => {
-  it('carries the update count from the avatar into Settings', async () => {
+  it('carries the update count from the application menu into Settings', async () => {
     mocks.guidance = { availableCount: 1, needsAttentionCount: 0 }
     render(<ActivityBarUtilityMenu compactRail denseRail={false} onOpenSettings={vi.fn()} onOpenConnectors={vi.fn()} />)
     expect(screen.getByRole('status', { name: '1 updates available' })).toBeTruthy()
@@ -117,8 +116,8 @@ describe('ActivityBarUtilityMenu', () => {
       onOpenSettings={vi.fn()} onOpenConnectors={onOpenConnectors} connectorsActive connectorWarnings={1} />)
     expect(screen.getByRole('status', { name: '1 connector needs attention' })).toBeTruthy()
     const trigger = screen.getByRole('button', { name: 'Alice’s Settings: Open application menu' })
-    expect(trigger.querySelector('img')?.getAttribute('src')).toBe(alicePet)
-    expect(trigger.querySelector('img')?.parentElement?.classList.contains('rounded-full')).toBe(true)
+    expect(trigger.querySelector('img')).toBeNull()
+    expect(trigger.querySelector('svg')).toBeTruthy()
     expect(trigger.textContent).toBe(compactRail ? '' : 'Alice’s Settings')
     expect(trigger.className).not.toContain('bg-sidebar-accent text-sidebar-accent-foreground')
     trigger.focus()
@@ -133,7 +132,7 @@ describe('ActivityBarUtilityMenu', () => {
   })
 })
 
-it('uses the blue avatar breadcrumb for setup failures without claiming an available update', async () => {
+it('uses the application menu breadcrumb for setup failures without claiming an available update', async () => {
   mocks.guidance = { availableCount: 0, needsAttentionCount: 0, setupCount: 1 }
   const { rerender } = render(<ActivityBarUtilityMenu compactRail denseRail={false} onOpenSettings={vi.fn()} onOpenConnectors={vi.fn()} />)
   expect(screen.getByRole('status', { name: 'projectSetup.title' }).className).toContain('bg-primary')
