@@ -260,13 +260,24 @@ uses). `apps/desktop/build/tray-pet.png` is a 64x64 head crop on a light
 circular badge; at 22x22 the full-body image was unreadable and the black bow
 vanished against a dark panel.
 
-`linux.icon` points at `icon-pet.png`; the deb/AppImage/RPM install it as
-`/usr/share/icons/hicolor/1024x1024/apps/open-alice.png` and the desktop entry
-uses `Icon=open-alice`. `extraResources` copies it to `resources/icon.png` and
-the tray crop to `resources/tray.png`. `app-window.ts` sets `BrowserWindow.icon`
-from `resources/icon.png` on Linux, and `resolveTrayIconPath` uses
+`linux.icon` points at the generated `apps/desktop/build/icons/` set (16-512;
+hicolor's index stops at 512, so the 1024 master is not shipped) and the
+desktop entry uses `Icon=open-alice`. `extraResources` copies the 256px icon to
+`resources/icon.png` (the BrowserWindow icon) and the tray crop to
+`resources/tray.png`. `app-window.ts` sets `BrowserWindow.icon` from
+`resources/icon.png` on Linux, and `resolveTrayIconPath` uses
 `resources/tray.png`, resized to 22x22 with `quality: 'best'`. macOS/Windows
 keep the existing full-body companion image.
+
+## 13. Linux GPU process crash (SIGTRAP)
+
+Electron 39's GPU process fails to launch under XWayland on Fedora 44
+(`GPU process launch failed: error_code=1002`); Chromium then hits
+`FATAL:content/browser/gpu/gpu_data_manager_impl_private.cc:415: GPU process
+isn't usable. Goodbye.` and the main process dies with SIGTRAP. The app can
+survive long enough for a startup smoke to pass, so reproduce it in the real
+session. Call `app.disableHardwareAcceleration()` on Linux before
+`app.whenReady()`; the desktop UI renders in software.
 
 The Quick Start header no longer renders the `aliceWave` hero image, and the
 bottom-left application-menu avatar now uses `ui/src/assets/alice-pet-avatar.png`

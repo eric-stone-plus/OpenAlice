@@ -28,6 +28,9 @@ export function createAppWindow(preload: string, title = 'OpenAlice'): AppWindow
     ...windowChromeOptions(),
     webPreferences: { preload, contextIsolation: true, nodeIntegration: false, sandbox: false },
   })
+  // Several desktop subsystems subscribe to the main window's lifecycle; the
+  // default limit of 10 is below the current combined count.
+  win.setMaxListeners(20)
   configureWindowChrome(win)
   let companion: CompanionHandle | undefined
   try { companion = createCompanion(win) } catch (error) { console.error('[companion] startup failed:', error) }

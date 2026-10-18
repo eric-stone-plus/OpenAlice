@@ -39,15 +39,19 @@ On Wayland the app relaunches itself under XWayland; no flag is required.
   with `visibleRect`; re-apply the initial position after the window is
   mapped; persist `offsetX/offsetY` in `companion.json`.
 - **Icons** (`apps/desktop/build/icon-pet.png`,
-  `apps/desktop/build/tray-pet.png`, `ui/src/assets/alice-pet-avatar.png`):
-  1024px app icon, 64px head crop resized to 22px for the tray, 24px avatar;
-  the Linux packages install the pet icon and the `.desktop` entry.
+  `apps/desktop/build/icons/`, `apps/desktop/build/tray-pet.png`,
+  `ui/src/assets/alice-pet-avatar.png`): the 1024px pet master generates the
+  16-512 hicolor set (the theme stops at 512); the 256px copy is the window
+  icon, the 64px head crop is resized to 22px for the tray, and the 24px
+  avatar stays in the UI. The Linux packages install the pet icon set and the
+  `.desktop` entry.
 - **UI** (`ui/src/pages/ChatLandingPage.tsx`,
   `ui/src/components/ActivityBarUtilityMenu.tsx`): removed the hero image
   above "What should Alice work on?"; the bottom-left avatar is the pet.
 - **Runtime** (`apps/desktop/src/main.ts`, `git-execution.ts`,
-  `console-guard.ts`): Wayland -> XWayland relaunch; system git fallback;
-  EPIPE-only console guard.
+  `console-guard.ts`): Wayland -> XWayland relaunch; software rendering on
+  Linux (the XWayland GPU process can fail with error_code=1002 and kill the
+  app); system git fallback; EPIPE-only console guard.
 - `PITFALLS.md` and `docs/tauri-migration-assessment.md` document the traps
   and the Tauri assessment.
 
@@ -62,6 +66,9 @@ On Wayland the app relaunches itself under XWayland; no flag is required.
 - `node scripts/smoke-packaged-toolchain.mjs --package-root dist/electron-app-pet`
 - `node scripts/desktop-startup-smoke.mjs --app-path dist/electron-app-pet/linux-unpacked/open-alice`
   (Xvfb; the renderer startup smoke passed for both Recent cases)
+- `desktop-file-validate /usr/share/applications/open-alice.desktop`
+- installed hicolor pet icons match `apps/desktop/build/icons/`; `WM_CLASS` is
+  `open-alice`, matching `StartupWMClass`
 
 Real session (packaged build, fresh profile, Huawei DP-1 1080x1920 at +0+0):
 the pet was placed at the left edge (window `0,1533`, offset `-198`), the

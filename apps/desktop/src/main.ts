@@ -172,6 +172,15 @@ protocol.registerSchemesAsPrivileged([
 
 const smokeUserData = process.env['OPENALICE_ELECTRON_SMOKE_USER_DATA']?.trim()
 if (smokeUserData) app.setPath('userData', smokeUserData)
+
+// Chromium's GPU process can fail to launch under XWayland on Linux
+// (GPU process launch failed: error_code=1002); the fatal "GPU process
+// isn't usable" check then kills the main process. The desktop UI does
+// not need hardware acceleration, so render in software on Linux.
+if (process.platform === 'linux') {
+  app.disableHardwareAcceleration()
+}
+
 if (existingOwnerSmokeMode() || process.env['OPENALICE_ELECTRON_SMOKE_STARTUP'] === '1') {
   app.commandLine.appendSwitch('no-sandbox')
   app.commandLine.appendSwitch('disable-gpu')
