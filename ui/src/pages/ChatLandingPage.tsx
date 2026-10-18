@@ -348,7 +348,11 @@ export function HarnessLandingPage({
           disabled={launching}
           sendLabel={t('chatLanding.send')}
           controls={
-            <fieldset disabled={launching} inert={launching} className="min-w-0 flex-1 disabled:opacity-60">
+            <fieldset
+              disabled={launching}
+              inert={launching}
+              className="flex min-w-0 flex-1 items-center gap-0.5 disabled:opacity-60"
+            >
               <AgentLaunchSelectors
                 ref={launchSelectorsRef}
                 config={launchConfig}
