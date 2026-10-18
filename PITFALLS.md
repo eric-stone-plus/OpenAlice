@@ -253,12 +253,14 @@ installed desktop file, icon and window association consistent.
 
 ## 12. GNOME app-grid, dock and tray icons
 
-The app icon is the pet character, not the older face-only `icon.png`.
-`apps/desktop/build/icon-pet.png` is a 1024x1024 RGBA rounded-square icon
-composed from `ui/public/companion/alice.png` (the same image the desktop pet
-uses). `apps/desktop/build/tray-pet.png` is a 64x64 head crop on a light
-circular badge; at 22x22 the full-body image was unreadable and the black bow
-vanished against a dark panel.
+The Linux app icon is the transparent pet character from
+`ui/public/companion/alice.png` (the same image the desktop pet uses), not the
+older face-only `icon.png` and not a background plate: the launcher and dock
+show only the character. `apps/desktop/build/icon-pet.png` is the 1024x1024
+transparent master; `apps/desktop/build/icons/` holds the 16-512 hicolor set.
+`apps/desktop/build/tray-pet.png` is a 64x64 head crop on a light circular
+badge; at 22x22 the full-body image was unreadable and the black bow vanished
+against a dark panel.
 
 `linux.icon` points at the generated `apps/desktop/build/icons/` set (16-512;
 hicolor's index stops at 512, so the 1024 master is not shipped) and the

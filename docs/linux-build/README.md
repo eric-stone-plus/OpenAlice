@@ -38,13 +38,14 @@ On Wayland the app relaunches itself under XWayland; no flag is required.
   edges where Mutter clamps negative window positions; select the display
   with `visibleRect`; re-apply the initial position after the window is
   mapped; persist `offsetX/offsetY` in `companion.json`.
-- **Icons** (`apps/desktop/build/icon-pet.png`,
-  `apps/desktop/build/icons/`, `apps/desktop/build/tray-pet.png`,
-  `ui/src/assets/alice-pet-avatar.png`): the 1024px pet master generates the
-  16-512 hicolor set (the theme stops at 512); the 256px copy is the window
-  icon, the 64px head crop is resized to 22px for the tray, and the 24px
-  avatar stays in the UI. The Linux packages install the pet icon set and the
-  `.desktop` entry.
+- **Icons** (`ui/public/companion/alice.png`,
+  `apps/desktop/build/icon-pet.png`, `apps/desktop/build/icons/`,
+  `apps/desktop/build/tray-pet.png`, `ui/src/assets/alice-pet-avatar.png`):
+  the transparent 1024px pet master generates the 16-512 hicolor set (the
+  theme stops at 512); the 256px copy is the window icon, the 64px head crop
+  is resized to 22px for the tray, and the 24px avatar stays in the UI. The
+  Linux packages install the pet icon set and the `.desktop` entry; the
+  launcher and dock show the character without a background plate.
 - **UI** (`ui/src/pages/ChatLandingPage.tsx`,
   `ui/src/components/ActivityBarUtilityMenu.tsx`): removed the hero image
   above "What should Alice work on?"; the bottom-left avatar is the pet.
