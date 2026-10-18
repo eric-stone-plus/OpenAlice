@@ -68,10 +68,13 @@ export function createCompanion(owner: BrowserWindow): CompanionHandle | undefin
     // Older builds persisted the X11 origin before the first post-map
     // placement, which parks the pet over the app window's top-left corner.
     // Treat (0,0) as "no saved position" and fall back to the bottom-right.
-    if (Number.isFinite(value.x) && Number.isFinite(value.y) && (value.x !== 0 || value.y !== 0)) {
+    // The edge offset belongs to the saved position: a discarded origin must
+    // not shift the fallback placement.
+    const hasSavedPosition = Number.isFinite(value.x) && Number.isFinite(value.y) && (value.x !== 0 || value.y !== 0)
+    if (hasSavedPosition) {
       saved = { x: value.x, y: value.y }
+      if (Number.isFinite(value.offsetX) && Number.isFinite(value.offsetY)) savedOffset = { x: value.offsetX, y: value.offsetY }
     }
-    if (Number.isFinite(value.offsetX) && Number.isFinite(value.offsetY)) savedOffset = { x: value.offsetX, y: value.offsetY }
   } catch { /* First launch or damaged launcher preference: use defaults. */ }
   const area = screen.getDisplayMatching(owner.getBounds()).workArea
   const width = Math.round(size * 2.7)
@@ -184,7 +187,11 @@ export function createCompanion(owner: BrowserWindow): CompanionHandle | undefin
     stopSnap()
     if (pet.isDestroyed()) return
     const current = companionBounds(pet)
-    const currentVirtual = { ...current, x: current.x + visualOffset.x, y: current.y + visualOffset.y }
+    // A hidden window can be parked at the origin by the window manager, so a
+    // re-settle while hidden starts from the last intended position instead.
+    const currentVirtual = pet.isVisible()
+      ? { ...current, x: current.x + visualOffset.x, y: current.y + visualOffset.y }
+      : { x: intended.x, y: intended.y, width: current.width, height: current.height }
     const targetArea = screen.getDisplayMatching(visibleRect(currentVirtual)).workArea
     const next = settleCompanion(currentVirtual, targetArea, snap, visualInsets(current.width, current.height))
     intended = { x: next.x, y: next.y, area: targetArea }
