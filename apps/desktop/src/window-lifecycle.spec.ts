@@ -5,8 +5,10 @@ import { describe, it } from 'vitest'
 
 import { configureWindowLifecycle, showAppWindow } from './window-lifecycle.js'
 
-function fixture() {
-  const app = new EventEmitter()
+function fixture(closeAction: 'hide' | 'quit' = 'hide') {
+  const app = Object.assign(new EventEmitter(), {
+    quit: () => { calls.push('quit') },
+  })
   const calls: string[] = []
   let destroyed = false
   let minimized = false
@@ -20,7 +22,7 @@ function fixture() {
     hide: () => { calls.push('hide') },
   })
   const window = win as unknown as BrowserWindow
-  configureWindowLifecycle(app as unknown as App, window, () => quitting)
+  configureWindowLifecycle(app as unknown as App, window, () => quitting, closeAction)
   const close = () => {
     let prevented = false
     win.emit('close', { preventDefault: () => { prevented = true } })
@@ -45,6 +47,14 @@ describe('desktop window lifecycle', () => {
     assert.equal(f.win.isDestroyed(), false)
     assert.deepEqual(f.calls, ['hide'])
     assert.equal(quitRequested, false)
+  })
+
+  it('quits fully on close where the desktop has no tray host', () => {
+    const f = fixture('quit')
+
+    assert.equal(f.close(), true)
+    assert.equal(f.win.isDestroyed(), false)
+    assert.deepEqual(f.calls, ['quit'])
   })
 
   it('restores the hidden window when the macOS Dock activates the app', () => {

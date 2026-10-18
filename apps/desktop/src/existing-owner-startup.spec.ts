@@ -6,6 +6,7 @@ import {
   dialogCancelId,
   dialogDefaultId,
   resolveExistingOwnerStartup,
+  waitForShutdownOwner,
 } from './existing-owner-startup.js'
 
 const electron = vi.hoisted(() => ({
@@ -190,5 +191,44 @@ describe('desktop existing-owner dialog', () => {
         },
       },
     })).resolves.toEqual({ action: 'continue', takeover: true })
+  })
+
+  it('waits out a graceful quit instead of reporting the closing owner', async () => {
+    let inspections = 0
+    await expect(resolveExistingOwnerStartup({
+      userDataHome: '/tmp/home',
+      launcherRoot: '/tmp/home/workspaces',
+      canChooseAnother: true,
+      takeoverRequested: false,
+      dependencies: {
+        inspectLocks: async () => (++inspections === 1 ? [activeLock] : []),
+        shutdownWait: {
+          readMarker: () => ({ pid: 42, startedAt: '2026-10-18T00:00:00.000Z' }),
+          inspectLock: async () => ({ ...activeLock, state: 'missing', owner: null }),
+          sleep: async () => undefined,
+          now: () => 0,
+        },
+        discoverRuntime: async () => null,
+        probeAuth: async () => false,
+        showMessageBox: electron.showMessageBox,
+        openExternal: electron.openExternal,
+      },
+    })).resolves.toEqual({ action: 'continue', takeover: false })
+
+    expect(inspections).toBe(2)
+    expect(electron.showMessageBox).not.toHaveBeenCalled()
+  })
+
+  it('ignores a shutdown marker left by another process', async () => {
+    let inspected = 0
+    await expect(waitForShutdownOwner({ pid: 7 }, '/tmp/home', {
+      readMarker: () => ({ pid: 8, startedAt: '2026-10-18T00:00:00.000Z' }),
+      inspectLock: async () => {
+        inspected += 1
+        return activeLock
+      },
+    })).resolves.toBe(false)
+
+    expect(inspected).toBe(0)
   })
 })

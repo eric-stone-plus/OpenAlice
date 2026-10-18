@@ -4,12 +4,17 @@ import { dirname } from 'node:path'
 
 import {
   decideExistingOwnerStartup,
+  guardianLockDir,
   inspectOpenAliceInstance,
+  inspectRuntimeLock,
   ownerLabel,
   probeLoopbackAuthStatus,
   readDiscoveredRuntimeStatus,
   type ExistingOwnerStartupDecision,
+  type RuntimeLockInspection,
 } from '@traderalice/guardian-runtime'
+
+import { clearShutdownMarker, readShutdownMarker, type ShutdownMarker } from './shutdown-marker.js'
 
 export type ExistingOwnerStartupResult =
   | { readonly action: 'continue'; readonly takeover: boolean }
@@ -23,6 +28,53 @@ export interface ExistingOwnerStartupDependencies {
   showMessageBox?: typeof dialog.showMessageBox
   showErrorBox?: typeof dialog.showErrorBox
   openExternal?: typeof shell.openExternal
+  shutdownWait?: ShutdownWaitDependencies
+}
+
+export interface ShutdownWaitDependencies {
+  readonly readMarker?: (home: string) => ShutdownMarker | null
+  readonly inspectLock?: (home: string) => Promise<RuntimeLockInspection>
+  readonly sleep?: (ms: number) => Promise<void>
+  readonly now?: () => number
+  readonly timeoutMs?: number
+  readonly pollMs?: number
+}
+
+/**
+ * A relaunch that races a graceful quit must wait for the recorded desktop
+ * owner to release its locks instead of reporting "already running". The
+ * marker is trusted only while it names the active owner, so a leftover
+ * marker from a killed process cannot delay the next launch.
+ */
+export async function waitForShutdownOwner(
+  owner: { readonly pid: number },
+  home: string,
+  dependencies: ShutdownWaitDependencies = {},
+): Promise<boolean> {
+  const marker = (dependencies.readMarker ?? readShutdownMarker)(home)
+  if (!marker || marker.pid !== owner.pid) return false
+  const inspectLock = dependencies.inspectLock
+    ?? ((value: string) => inspectRuntimeLock(guardianLockDir(value)))
+  const sleep = dependencies.sleep ?? ((ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms)))
+  const now = dependencies.now ?? Date.now
+  const deadline = now() + (dependencies.timeoutMs ?? 12_000)
+  const pollMs = dependencies.pollMs ?? 200
+  while (now() < deadline) {
+    await sleep(pollMs)
+    let state: RuntimeLockInspection
+    try {
+      state = await inspectLock(home)
+    } catch {
+      // Cannot confirm the release; fall back to the normal conflict decision
+      // instead of aborting startup on a transient inspection failure.
+      return false
+    }
+    if (state.state !== 'active' || state.owner?.pid !== owner.pid) {
+      clearShutdownMarker(home)
+      return true
+    }
+  }
+  return false
 }
 
 export function existingOwnerSmokeMode(
@@ -51,13 +103,23 @@ export async function resolveExistingOwnerStartup(options: {
   })
   const active = inspections.find((row) => row.state === 'active' && row.owner)
   if (!active?.owner) return { action: 'continue', takeover: false }
+  let owner = active
+  if (await waitForShutdownOwner({ pid: active.owner.pid }, options.userDataHome, options.dependencies?.shutdownWait)) {
+    const refreshed = await inspectLocks({
+      userDataHome: options.userDataHome,
+      launcherRoot: options.launcherRoot,
+    })
+    const next = refreshed.find((row) => row.state === 'active' && row.owner)
+    if (!next?.owner) return { action: 'continue', takeover: false }
+    owner = next
+  }
 
   const discovered = await discoverRuntime({ homeRoot: options.userDataHome })
   const advertised = discovered?.endpoints.web
   const probeOk = advertised ? await probeAuth(advertised) : false
   const decision = decideExistingOwnerStartup({
     home: options.userDataHome,
-    lock: active,
+    lock: owner,
     discovered,
     probeOk,
     canChooseAnother: options.canChooseAnother,

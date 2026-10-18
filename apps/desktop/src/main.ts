@@ -64,6 +64,7 @@ import { childIsRunning, stopChild } from './child-shutdown.js'
 import { exitDesktopProcess } from './app-exit.js'
 import { createAppWindow } from './app-window.js'
 import { configureWindowLifecycle, showAppWindow } from './window-lifecycle.js'
+import { clearShutdownMarker, writeShutdownMarker } from './shutdown-marker.js'
 import type { CompanionHandle } from './companion.js'
 import { CLI_VERSION, UpdateControlService, ClientUpdateService, WebRelay, readStartupTarget, writeStartupTarget, resolveLocalStartupHome, inspectLocalMachine } from './web-relay.js'
 import { installConsoleEpipeGuard } from './console-guard.js'
@@ -110,6 +111,9 @@ let uta: ChildProcess | null = null
 let connector: ChildProcess | null = null
 let alice: ChildProcess | null = null
 let appQuitting = false
+// The data home whose locks this process holds; the shutdown marker is written
+// there so a relaunch that races the quit can wait for the release.
+let shutdownHome: string | null = null
 let tray: Tray | null = null
 let restartingUTA = false
 let restartingConnector = false
@@ -130,6 +134,11 @@ const DEFAULT_WEB_PORT_START = 47331
 const READY_TIMEOUT_MS = 30_000
 const UTA_READY_TIMEOUT_MS = 15_000
 const SIGTERM_GRACE_MS = 5_000
+// GNOME and most Linux desktops do not host an AppIndicator by default, so a
+// hidden window would leave no tray entry to restore it and no quit
+// affordance. Closing the window is a full quit there; Windows and macOS keep
+// the tray/Dock hide behavior.
+const WINDOW_CLOSE_ACTION: 'hide' | 'quit' = process.platform === 'linux' ? 'quit' : 'hide'
 const UTA_RESTART_GRACE_MS = 8_000
 const DATA_HOME_PREFERENCES_FILE = 'openalice-data-home.json'
 const UPDATE_ATTEMPT_FILE = 'openalice-update-attempt.json'
@@ -586,7 +595,7 @@ async function startDesktopLauncher(repoRoot: string, updateAttemptPath: string,
     read: async (query, signal) => { const response = await win.webContents.session.fetch(`${relay.originUrl}/api/agent-runtime${query}`, { signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15_000)]) : AbortSignal.timeout(15_000) }); if (!response.ok) throw new Error('Activity unavailable'); return response.json() },
   })
   Menu.setApplicationMenu(process.platform === 'darwin' ? Menu.buildFromTemplate([{ role: 'appMenu' }, { role: 'editMenu' }, { role: 'windowMenu' }]) : null)
-  configureWindowLifecycle(app, win, () => appQuitting)
+  configureWindowLifecycle(app, win, () => appQuitting, WINDOW_CLOSE_ACTION)
   win.webContents.on('will-navigate', (event, destination) => {
     if (new URL(destination).origin === relay.originUrl) return
     event.preventDefault()
@@ -777,6 +786,7 @@ app.whenReady().then(async () => {
   }
 
   let userDataHome = resolvedDataHome.home
+  shutdownHome = userDataHome
   let dataHomeSource = resolvedDataHome.source
   let dataHomePreferences = resolvedDataHome.preferences
   let selectedDefaultHome = resolvedDataHome.selectedDefault
@@ -1164,7 +1174,7 @@ app.whenReady().then(async () => {
       return response.json()
     },
   })
-  configureWindowLifecycle(app, win, () => appQuitting)
+  configureWindowLifecycle(app, win, () => appQuitting, WINDOW_CLOSE_ACTION)
   const mayNavigate = (destination: string): boolean => {
     try {
       const url = new URL(destination)
@@ -1690,10 +1700,15 @@ async function stopChildren(): Promise<void> {
 /** Cascade tree-kill both children, then exit once they're gone. */
 function shutdown(): void {
   if (appQuitting) return
+  // Publish the quit before stopping children: a relaunch that lands inside
+  // the SIGTERM grace window waits for this process to release its locks
+  // instead of reporting another instance as healthy.
+  if (shutdownHome) writeShutdownMarker(shutdownHome)
   void stopChildren().finally(async () => {
     await desktopRelay?.close().catch((error) => console.error('[guardian] relay close failed:', error))
     desktopRelay = null
-    await releaseGuardianRuntimeLock()
+    await releaseGuardianRuntimeLock().catch((error) => console.error('[guardian] runtime lock release failed:', error))
+    if (shutdownHome) clearShutdownMarker(shutdownHome)
     const exitCode = typeof process.exitCode === 'number' ? process.exitCode : 0
     console.log(`[guardian] shutdown complete → exit ${exitCode}`)
     exitDesktopProcess(exitCode, {
@@ -1743,7 +1758,17 @@ app.on('before-quit', (e) => {
   shutdown()
 })
 
+// Logout, `kill`, and Ctrl+C must release the data locks and stop children
+// exactly like the in-app quit path; Electron's default signal handling
+// terminates the main process without running before-quit. Repeated signals
+// are absorbed while shutdown runs: `appQuitting` makes `shutdown()` a no-op,
+// so a second signal can never cut the cleanup short.
+for (const signal of ['SIGTERM', 'SIGINT'] as const) {
+  process.on(signal, () => { shutdown() })
+}
+
 app.on('window-all-closed', () => {
-  // Closing a window never shuts down the runtime. The tray Quit action or
-  // macOS Cmd+Q/app menu owns explicit shutdown through before-quit.
+  // Linux quits from the window lifecycle above. Windows and macOS keep the
+  // runtime alive so the tray or Dock can restore the window; Quit owns
+  // shutdown there.
 })

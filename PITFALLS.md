@@ -281,9 +281,10 @@ survive long enough for a startup smoke to pass, so reproduce it in the real
 session. Call `app.disableHardwareAcceleration()` on Linux before
 `app.whenReady()`; the desktop UI renders in software.
 
-The Quick Start header no longer renders the `aliceWave` hero image, and the
-bottom-left application-menu avatar now uses `ui/src/assets/alice-pet-avatar.png`
-(a 256x256 centered head crop of the same pet image, bow and chin included).
+The Quick Start header no longer renders the `aliceWave` hero image. The
+bottom-left application-menu button carries the “Alice’s Settings” label and an
+ellipsis icon; its circular avatar was removed because the crop never aligned
+cleanly at rail sizes.
 
 For Fedora, the `rpm` target is the native install path; it needs `rpmbuild`
 (`sudo dnf install rpm-build`). The built RPM
@@ -345,7 +346,27 @@ The unit tests in `apps/desktop/src/companion-geometry.spec.ts` cover the
 portrait-screen edges: the visible left/top/right/bottom reach the work-area
 edges while the window bounds may be negative or past the screen.
 
-## 14. Recommended build sequence
+## 14. Linux window close quits the runtime
+
+Windows and macOS keep the guardian alive when the last window closes and
+restore it from the tray or Dock. GNOME and most Linux desktops do not host an
+AppIndicator by default, so the same behavior left the process running with no
+visible window, no tray entry, and no quit affordance; relaunching then hit the
+“OpenAlice is already running” owner dialog. On Linux a window close now calls
+`app.quit()`, which runs `before-quit` → `shutdown()`: stop children (SIGTERM,
+5s grace, then SIGKILL), close the relay, release the guardian/runtime locks,
+and exit.
+
+A relaunch that lands inside that grace window used to see the still-alive
+owner and show the conflict dialog. `shutdown()` now writes
+`<home>/state/desktop-shutdown.json` before stopping children, and
+`resolveExistingOwnerStartup` waits up to 12s for that exact pid's guardian
+lock to disappear before deciding. The marker is trusted only while it names
+the active owner, and it is cleared after the locks are released, so a stale
+marker cannot delay a normal launch. SIGTERM/SIGINT run the same shutdown;
+repeated signals are absorbed while cleanup is in progress.
+
+## 15. Recommended build sequence
 
 ```bash
 cd /path/to/openalice
