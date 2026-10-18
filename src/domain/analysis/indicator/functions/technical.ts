@@ -7,7 +7,7 @@
  */
 
 import { toValues, type TrackedValues } from '../types'
-import { EMA } from './statistics'
+import { EMA, emaSeries } from './statistics'
 
 type NumericInput = number[] | TrackedValues
 
@@ -79,18 +79,17 @@ export function MACD(
     )
   }
 
-  const fastEMA = EMA(v, fastPeriod)
-  const slowEMA = EMA(v, slowPeriod)
-  const macdValue = fastEMA - slowEMA
-
+  // Compute each EMA once over the full series. Recomputing the EMA for every
+  // prefix (the previous implementation) is O(n^2); the incremental series is
+  // O(n) and yields bit-identical values at every prefix.
+  const fastSeries = emaSeries(v, fastPeriod)
+  const slowSeries = emaSeries(v, slowPeriod)
   const macdHistory: number[] = []
   for (let i = slowPeriod; i <= v.length; i++) {
-    const slice = v.slice(0, i)
-    const fast = EMA(slice, fastPeriod)
-    const slow = EMA(slice, slowPeriod)
-    macdHistory.push(fast - slow)
+    macdHistory.push(fastSeries[i - fastPeriod] - slowSeries[i - slowPeriod])
   }
 
+  const macdValue = fastSeries[v.length - fastPeriod] - slowSeries[v.length - slowPeriod]
   const signalValue = EMA(macdHistory, signalPeriod)
   const histogram = macdValue - signalValue
 

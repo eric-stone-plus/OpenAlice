@@ -22,17 +22,28 @@ export function SMA(data: NumericInput, period: number): number {
 }
 
 /** Exponential Moving Average */
-export function EMA(data: NumericInput, period: number): number {
+/**
+ * Full EMA series, one value per input index from `period - 1` onwards.
+ * Seeded with the SMA of the first `period` values, matching the scalar EMA.
+ */
+export function emaSeries(data: NumericInput, period: number): number[] {
   const v = toValues(data)
   if (v.length < period) {
     throw new Error(`EMA requires at least ${period} data points, got ${v.length}`)
   }
   const multiplier = 2 / (period + 1)
   let ema = v.slice(0, period).reduce((acc, val) => acc + val, 0) / period
+  const series = [ema]
   for (let i = period; i < v.length; i++) {
     ema = (v[i] - ema) * multiplier + ema
+    series.push(ema)
   }
-  return ema
+  return series
+}
+
+export function EMA(data: NumericInput, period: number): number {
+  const series = emaSeries(data, period)
+  return series[series.length - 1]
 }
 
 /** Standard Deviation */
@@ -52,7 +63,14 @@ export function MAX(data: NumericInput): number {
   if (v.length === 0) {
     throw new Error('MAX requires at least 1 data point')
   }
-  return Math.max(...v)
+  // Loop instead of Math.max(...v): spreading a large series overflows the
+  // argument limit and throws RangeError on long histories.
+  let max = v[0]
+  for (let i = 1; i < v.length; i++) {
+    if (Number.isNaN(v[i])) return Number.NaN
+    if (v[i] > max) max = v[i]
+  }
+  return max
 }
 
 /** Minimum value */
@@ -61,7 +79,12 @@ export function MIN(data: NumericInput): number {
   if (v.length === 0) {
     throw new Error('MIN requires at least 1 data point')
   }
-  return Math.min(...v)
+  let min = v[0]
+  for (let i = 1; i < v.length; i++) {
+    if (Number.isNaN(v[i])) return Number.NaN
+    if (v[i] < min) min = v[i]
+  }
+  return min
 }
 
 /** Sum */
@@ -152,12 +175,22 @@ export function CORRELATION(a: NumericInput, b: NumericInput): number {
 export function HIGHEST(data: NumericInput, period: number): number {
   const v = toValues(data).slice(-period)
   if (v.length === 0) throw new Error('HIGHEST requires at least 1 data point')
-  return Math.max(...v)
+  let max = v[0]
+  for (let i = 1; i < v.length; i++) {
+    if (Number.isNaN(v[i])) return Number.NaN
+    if (v[i] > max) max = v[i]
+  }
+  return max
 }
 
 /** Lowest value over the last `period` bars. */
 export function LOWEST(data: NumericInput, period: number): number {
   const v = toValues(data).slice(-period)
   if (v.length === 0) throw new Error('LOWEST requires at least 1 data point')
-  return Math.min(...v)
+  let min = v[0]
+  for (let i = 1; i < v.length; i++) {
+    if (Number.isNaN(v[i])) return Number.NaN
+    if (v[i] < min) min = v[i]
+  }
+  return min
 }

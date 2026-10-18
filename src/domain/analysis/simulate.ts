@@ -74,6 +74,9 @@ export async function simulate(
 ): Promise<SimulateResult | { error: string }> {
   const interval = opts.interval ?? '1d'
   const rule = opts.exit
+  if (rule.type === 'ma_break' && (!Number.isInteger(rule.period) || rule.period <= 0)) {
+    return { error: `ma_break period must be a positive integer, got ${rule.period}` }
+  }
   // Pad the fetch window BEFORE the entry so an MA rule has history to define the
   // moving average at the entry bar. Non-MA rules don't need it (harmless).
   const lookback = rule.type === 'ma_break' ? rule.period : 0
@@ -98,11 +101,17 @@ export async function simulate(
   const entryPrice = entryBar.close
   const closes = bars.map((b) => b.close)
 
-  const rollingSma = (i: number, period: number): number | null => {
-    if (i - period + 1 < 0) return null
-    let s = 0
-    for (let k = i - period + 1; k <= i; k++) s += closes[k]
-    return s / period
+  // Precompute the SMA once with a rolling sum. The exit check used to rebuild
+  // the whole window at every bar (O(n·period)); a rolling sum makes it O(n).
+  const sma: Array<number | null> = new Array(bars.length).fill(null)
+  if (rule.type === 'ma_break') {
+    const period = rule.period
+    let sum = 0
+    for (let i = 0; i < closes.length; i++) {
+      sum += closes[i]
+      if (i >= period) sum -= closes[i - period]
+      if (i >= period - 1) sma[i] = sum / period
+    }
   }
 
   let peakClose = entryPrice
@@ -129,8 +138,16 @@ export async function simulate(
         if (b.close <= peakClose * (1 - rule.pct / 100)) reason = `close ${px(b.close)} fell ${rule.pct}% from peak ${px(peakClose)}`
         break
       case 'ma_break': {
-        const ma = rollingSma(i, rule.period)
-        if (ma != null && b.close < ma) reason = `close ${px(b.close)} broke below SMA${rule.period} ${px(ma)}`
+        const ma = sma[i]
+        if (ma != null) {
+          // The rolling sum and the old per-bar window sum differ in the last
+          // bits. Without a tolerance, a close exactly on the SMA can look
+          // like a break (e.g. 99.05 < 99.05000000000001).
+          const tolerance = 1e-9 * Math.max(1, Math.abs(ma))
+          if (b.close < ma - tolerance) {
+            reason = `close ${px(b.close)} broke below SMA${rule.period} ${px(ma)}`
+          }
+        }
         break
       }
       case 'stop':

@@ -358,3 +358,129 @@ describe('errors', () => {
     await expect(calc("SMA(CLOSE('AAPL', '1d'), 10)[0]")).rejects.toThrow('requires an array')
   })
 })
+
+// ==================== 参数校验与并发隔离 ====================
+
+describe('argument validation', () => {
+  it('MEDIAN with no argument throws a clear error', async () => {
+    await expect(calc('MEDIAN()')).rejects.toThrow('MEDIAN requires 1 argument')
+  })
+
+  it('ROC with one argument throws a clear error', async () => {
+    await expect(calc("ROC(CLOSE('AAPL', '1d'))")).rejects.toThrow('ROC requires 2 arguments')
+  })
+
+  it('CORRELATION with one argument throws a clear error', async () => {
+    await expect(calc("CORRELATION(CLOSE('AAPL', '1d'))")).rejects.toThrow(
+      'CORRELATION requires 2 arguments',
+    )
+  })
+
+  it('HIGHEST with one argument throws a clear error', async () => {
+    await expect(calc("HIGHEST(CLOSE('AAPL', '1d'))")).rejects.toThrow(
+      'HIGHEST requires 2 arguments',
+    )
+  })
+})
+
+describe('cache isolation', () => {
+  it('serializes concurrent calculations on one instance', async () => {
+    const calculator = new IndicatorCalculator(mockContext)
+    const [first, second] = await Promise.all([
+      calculator.calculate("CLOSE('AAPL', '1d')"),
+      calculator.calculate("CLOSE('MSFT', '1d')"),
+    ])
+    expect(Object.keys(first.dataRange)).toEqual(['AAPL'])
+    expect(Object.keys(second.dataRange)).toEqual(['MSFT'])
+  })
+
+  it('does not collide when a symbol or interval contains NUL', async () => {
+    let calls = 0
+    const context: IndicatorContext = {
+      getHistoricalData: async (symbol: string, interval: string) => {
+        calls++
+        return {
+          data: mockData,
+          meta: {
+            symbol,
+            interval,
+            from: mockData[0].date,
+            to: mockData[mockData.length - 1].date,
+            bars: mockData.length,
+          },
+        }
+      },
+    }
+    const nul = String.fromCharCode(0)
+    const calculator = new IndicatorCalculator(context)
+    await calculator.calculate(
+      `SMA(CLOSE('A${nul}B', '1d'), 2) + SMA(CLOSE('A', 'B${nul}1d'), 2)`,
+    )
+    expect(calls).toBe(2)
+  })
+})
+
+// ==================== 统计函数公式层可达性 ====================
+
+describe('statistics functions reachable from formulas', () => {
+  it('MEDIAN', async () => {
+    expect((await calc("MEDIAN(CLOSE('AAPL', '1d'))")).value).toBe(124.5)
+  })
+
+  it('ROC', async () => {
+    expect((await calc("ROC(CLOSE('AAPL', '1d'), 10)")).value).toBe(7.1942)
+  })
+
+  it('ZSCORE with an explicit window', async () => {
+    expect((await calc("ZSCORE(CLOSE('AAPL', '1d'), 10)")).value).toBe(1.5667)
+  })
+
+  it('SLOPE', async () => {
+    expect((await calc("SLOPE(CLOSE('AAPL', '1d'), 10)")).value).toBe(1)
+  })
+
+  it('CORRELATION of two perfectly linear series', async () => {
+    expect((await calc("CORRELATION(CLOSE('AAPL', '1d'), HIGH('AAPL', '1d'))")).value).toBe(1)
+  })
+
+  it('HIGHEST', async () => {
+    expect((await calc("HIGHEST(CLOSE('AAPL', '1d'), 10)")).value).toBe(149)
+  })
+
+  it('LOWEST', async () => {
+    expect((await calc("LOWEST(CLOSE('AAPL', '1d'), 10)")).value).toBe(140)
+  })
+})
+
+// ==================== 单次计算内的数据缓存 ====================
+
+describe('per-calculation data cache', () => {
+  it('fetches one symbol/interval once even when referenced several times', async () => {
+    let calls = 0
+    const context: IndicatorContext = {
+      getHistoricalData: async (symbol: string, interval: string) => {
+        calls++
+        return {
+          data: mockData,
+          meta: {
+            symbol,
+            interval,
+            from: mockData[0].date,
+            to: mockData[mockData.length - 1].date,
+            bars: mockData.length,
+          },
+        }
+      },
+    }
+    const calculator = new IndicatorCalculator(context)
+    const result = await calculator.calculate(
+      "(CLOSE('AAPL', '1d')[-1] - SMA(CLOSE('AAPL', '1d'), 2)) / SMA(CLOSE('AAPL', '1d'), 2) * 100",
+    )
+    expect(calls).toBe(1)
+    expect(result.value).toBe(0.3367)
+    expect(result.dataRange.AAPL).toBeDefined()
+
+    await calculator.calculate("CLOSE('AAPL', '1d')")
+    expect(calls).toBe(2)
+  })
+})

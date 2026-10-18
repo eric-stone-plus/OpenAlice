@@ -45,7 +45,7 @@ Data access (returns array — use [-1] for latest value):
   CLOSE('AAPL', '1d')[-1] → latest close price as a single number.
 
 Statistics (returns a single number — do NOT use [-1]):
-  SMA(data, period), EMA, STDEV, MAX, MIN, SUM, AVERAGE.
+  SMA(data, period), EMA, STDEV, MAX, MIN, SUM, AVERAGE, MEDIAN, ROC(data, period), ZSCORE(data[, period]), SLOPE(data, period), CORRELATION(a, b), HIGHEST(data, period), LOWEST(data, period).
 
 Technical — trend / momentum (returns a single number or object — do NOT use [-1]):
   RSI(data, 14) → number.  BBANDS(data, 20, 2) → {upper, middle, lower}.

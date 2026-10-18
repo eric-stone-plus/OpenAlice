@@ -75,4 +75,27 @@ describe('simulate', () => {
     })
     expect('error' in r).toBe(true)
   })
+
+  it('does not exit when the close equals the SMA exactly', async () => {
+    // The rolling sum and the old window sum differ in the last bits:
+    // 99.05 vs 99.05000000000001. Equality is not a break.
+    const svc = svcOf(makeBars([99, 99, 99.1, 99.05]))
+    const r = ok(await simulate(svc, { barId: 'alpaca|XLE' } as never, {
+      entryDate: '2026-04-01', exit: { type: 'ma_break', period: 3 },
+    }))
+    expect(r.exit).toBeNull()
+    expect(r.open).toBe(true)
+  })
+
+  it('rejects a non-integer or non-positive ma_break period', async () => {
+    const svc = svcOf(makeBars([100, 101, 102]))
+    const fractional = await simulate(svc, { barId: 'alpaca|XLE' } as never, {
+      entryDate: '2026-04-01', exit: { type: 'ma_break', period: 2.5 },
+    })
+    expect('error' in fractional).toBe(true)
+    const zero = await simulate(svc, { barId: 'alpaca|XLE' } as never, {
+      entryDate: '2026-04-01', exit: { type: 'ma_break', period: 0 },
+    })
+    expect('error' in zero).toBe(true)
+  })
 })

@@ -12,6 +12,7 @@
 import type {
   ASTNode,
   CalculationResult,
+  HistoricalDataResult,
   IndicatorContext,
   FunctionNode,
   BinaryOpNode,
@@ -29,26 +30,77 @@ export interface CalculateOutput {
   dataRange: Record<string, DataSourceMeta>
 }
 
+/**
+ * Memoize historical-data fetches for one `calculate()` call.
+ *
+ * A formula commonly references the same series several times, e.g.
+ * `(CLOSE('AAPL','1d')[-1] - SMA(CLOSE('AAPL','1d'), 50)) / SMA(CLOSE('AAPL','1d'), 50)`.
+ * Without this wrapper each reference re-enters the data layer. Caching the
+ * promise (not just the resolved value) also deduplicates the concurrent
+ * `Promise.all` argument evaluation inside `executeFunction`.
+ */
+function createCachedContext(context: IndicatorContext): IndicatorContext {
+  const cache = new Map<string, Map<string, Promise<HistoricalDataResult>>>()
+  return {
+    getHistoricalData(symbol: string, interval: string): Promise<HistoricalDataResult> {
+      let byInterval = cache.get(symbol)
+      if (!byInterval) {
+        byInterval = new Map<string, Promise<HistoricalDataResult>>()
+        cache.set(symbol, byInterval)
+      }
+      const pending = byInterval.get(interval)
+      if (pending) return pending
+      const request = context.getHistoricalData(symbol, interval)
+      byInterval.set(interval, request)
+      return request
+    },
+  }
+}
+
 export class IndicatorCalculator {
   private dataSources: Record<string, DataSourceMeta> = {}
+  private activeContext: IndicatorContext
+  private tail: Promise<void> = Promise.resolve()
 
-  constructor(private context: IndicatorContext) {}
+  constructor(private context: IndicatorContext) {
+    this.activeContext = context
+  }
 
   async calculate(
     formula: string,
     precision: number = 4,
   ): Promise<CalculateOutput> {
+    // `dataSources` and `activeContext` are instance state, so two concurrent
+    // calls would otherwise share a cache and a result range. Serialize calls
+    // on one instance; the calculation is CPU-bound and short.
+    const run = this.tail.then(() => this.calculateInternal(formula, precision))
+    this.tail = run.then(
+      () => undefined,
+      () => undefined,
+    )
+    return run
+  }
+
+  private async calculateInternal(
+    formula: string,
+    precision: number,
+  ): Promise<CalculateOutput> {
     this.dataSources = {}
-    const ast = this.parse(formula)
-    const result = await this.evaluate(ast)
+    this.activeContext = createCachedContext(this.context)
+    try {
+      const ast = this.parse(formula)
+      const result = await this.evaluate(ast)
 
-    if (typeof result === 'string') {
-      throw new Error(`Invalid formula: result cannot be a string. Got: "${result}"`)
-    }
+      if (typeof result === 'string') {
+        throw new Error(`Invalid formula: result cannot be a string. Got: "${result}"`)
+      }
 
-    return {
-      value: this.applyPrecision(result, precision),
-      dataRange: this.dataSources,
+      return {
+        value: this.applyPrecision(result, precision),
+        dataRange: this.dataSources,
+      }
+    } finally {
+      this.activeContext = this.context
     }
   }
 
@@ -268,7 +320,7 @@ export class IndicatorCalculator {
     // Data access functions: FUNC('symbol', 'interval') → TrackedValues
     if (name === 'CLOSE' || name === 'HIGH' || name === 'LOW' || name === 'OPEN' || name === 'VOLUME') {
       const fn = DataAccess[name]
-      const result = await fn(evaluatedArgs[0] as string, evaluatedArgs[1] as string, this.context)
+      const result = await fn(evaluatedArgs[0] as string, evaluatedArgs[1] as string, this.activeContext)
       this.collectSource(result)
       return result
     }
@@ -281,6 +333,40 @@ export class IndicatorCalculator {
     if (name === 'MIN') return Statistics.MIN(evaluatedArgs[0] as number[] | TrackedValues)
     if (name === 'SUM') return Statistics.SUM(evaluatedArgs[0] as number[] | TrackedValues)
     if (name === 'AVERAGE') return Statistics.AVERAGE(evaluatedArgs[0] as number[] | TrackedValues)
+    if (name === 'MEDIAN') {
+      if (evaluatedArgs.length < 1) throw new Error('MEDIAN requires 1 argument')
+      return Statistics.MEDIAN(evaluatedArgs[0] as number[] | TrackedValues)
+    }
+    if (name === 'ROC') {
+      if (evaluatedArgs.length < 2) throw new Error('ROC requires 2 arguments')
+      return Statistics.ROC(evaluatedArgs[0] as number[] | TrackedValues, evaluatedArgs[1] as number)
+    }
+    if (name === 'ZSCORE') {
+      if (evaluatedArgs.length < 1) throw new Error('ZSCORE requires 1 or 2 arguments')
+      return Statistics.ZSCORE(
+        evaluatedArgs[0] as number[] | TrackedValues,
+        evaluatedArgs[1] as number | undefined,
+      )
+    }
+    if (name === 'SLOPE') {
+      if (evaluatedArgs.length < 2) throw new Error('SLOPE requires 2 arguments')
+      return Statistics.SLOPE(evaluatedArgs[0] as number[] | TrackedValues, evaluatedArgs[1] as number)
+    }
+    if (name === 'CORRELATION') {
+      if (evaluatedArgs.length < 2) throw new Error('CORRELATION requires 2 arguments')
+      return Statistics.CORRELATION(
+        evaluatedArgs[0] as number[] | TrackedValues,
+        evaluatedArgs[1] as number[] | TrackedValues,
+      )
+    }
+    if (name === 'HIGHEST') {
+      if (evaluatedArgs.length < 2) throw new Error('HIGHEST requires 2 arguments')
+      return Statistics.HIGHEST(evaluatedArgs[0] as number[] | TrackedValues, evaluatedArgs[1] as number)
+    }
+    if (name === 'LOWEST') {
+      if (evaluatedArgs.length < 2) throw new Error('LOWEST requires 2 arguments')
+      return Statistics.LOWEST(evaluatedArgs[0] as number[] | TrackedValues, evaluatedArgs[1] as number)
+    }
 
     // Technical indicator functions — accept number[] | TrackedValues
     if (name === 'RSI') return Technical.RSI(evaluatedArgs[0] as number[] | TrackedValues, evaluatedArgs[1] as number)
