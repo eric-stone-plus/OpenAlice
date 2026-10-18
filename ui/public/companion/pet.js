@@ -4,6 +4,7 @@ const bridge = window.companion;
 const pet = document.querySelector('#pet');
 const portrait = document.querySelector('#portrait');
 const body = document.querySelector('#body');
+const offset = document.querySelector('#offset');
 const mirror = document.querySelector('#mirror');
 const bubble = document.querySelector('#bubble');
 const message = document.querySelector('#message');
@@ -128,6 +129,7 @@ pet.addEventListener('keydown', event => {
 document.addEventListener('mousemove', event => update({ x: event.clientX, y: event.clientY }));
 bridge?.onCursor(update);
 bridge?.onFlip(value => { flipped = value; mirror.classList.toggle('flipped', value); });
+bridge?.onOffset(value => { offset.style.transform = `translate(${value.x}px, ${value.y}px)`; });
 let hitFrame = 0;
 let hitUntil = 0;
 document.addEventListener('transitionrun', () => {

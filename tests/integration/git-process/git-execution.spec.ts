@@ -6,10 +6,24 @@ vi.mock('dugite', () => ({ exec: vi.fn(async () => ({ stdout: 'bundled', stderr:
 afterEach(() => { vi.unstubAllGlobals(); vi.clearAllMocks() })
 
 describe('distribution-specific Git execution', () => {
-  it('preserves dugite for Electron and source', async () => {
+  it('uses dugite on non-Linux for Electron and source', async () => {
+    const original = process.platform
+    Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true })
+    try {
+      vi.stubGlobal('__OPENALICE_BUN_STANDALONE__', false)
+      expect((await exec(['--version'], process.cwd())).stdout).toBe('bundled')
+      expect(bundledExec).toHaveBeenCalled()
+    } finally {
+      Object.defineProperty(process, 'platform', { value: original, configurable: true })
+    }
+  })
+
+  it('uses system git on Linux for Electron and source', async () => {
+    if (process.platform !== 'linux') return
     vi.stubGlobal('__OPENALICE_BUN_STANDALONE__', false)
-    expect((await exec(['--version'], process.cwd())).stdout).toBe('bundled')
-    expect(bundledExec).toHaveBeenCalled()
+    const result = await exec(['--version'], process.cwd())
+    expect(result.stdout).toMatch(/^git version /)
+    expect(bundledExec).not.toHaveBeenCalled()
   })
 
   it('uses the selected system executable for native CLI without dugite environment rewriting', async () => {

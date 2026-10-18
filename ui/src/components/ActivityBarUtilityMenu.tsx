@@ -1,4 +1,4 @@
-import aliceWave from '../../../default/stickers/alice-color/wave.png'
+import alicePet from '../assets/alice-pet-avatar.png'
 import { Ellipsis, Laptop, Moon, Plug, Settings, Sun, Ghost } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -78,7 +78,7 @@ export function ActivityBarUtilityMenu({
         )}
       >
         <span aria-hidden className={`${denseRail ? 'size-6' : 'size-7'} flex shrink-0 items-center justify-center overflow-hidden rounded-full border border-sidebar-foreground/15 bg-sidebar-accent/60 p-0.5`}>
-          <img src={aliceWave} alt="" draggable={false} className="size-full origin-[50%_38%] scale-[1.8] object-contain" />
+          <img src={alicePet} alt="" draggable={false} className="size-full object-cover" />
         </span>
         {!compactRail && (
           <span className="min-w-0 flex-1 truncate text-[14px] font-medium">{t('nav.yourAlice')}</span>

@@ -10,6 +10,7 @@
     }
   },
   "main": "dist/electron/main.js",
+  "desktopName": "open-alice.desktop",
   "scripts": {
     "cli": "node packages/cli/bin/openalice.ts",
     "dev": "tsx scripts/guardian/dev.ts",
@@ -188,6 +189,48 @@
         }
       ]
     },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb",
+        "rpm",
+        "tar.gz"
+      ],
+      "category": "Office;Finance",
+      "packageCategory": "misc",
+      "icon": "apps/desktop/build/icon-pet.png",
+      "maintainer": "OpenAlice Contributors <openalice@users.noreply.github.com>",
+      "vendor": "OpenAlice Contributors",
+      "synopsis": "File-based trading agent workspace",
+      "syncDesktopName": true
+    },
+    "deb": {
+      "depends": [
+        "libgtk-3-0",
+        "libnotify4",
+        "libnss3",
+        "libxss1",
+        "libxtst6",
+        "xdg-utils",
+        "libatspi2.0-0",
+        "libuuid1",
+        "libsecret-1-0",
+        "git"
+      ]
+    },
+    "rpm": {
+      "depends": [
+        "gtk3",
+        "libnotify",
+        "nss",
+        "libXScrnSaver",
+        "(libXtst or libXtst6)",
+        "xdg-utils",
+        "at-spi2-core",
+        "(libuuid or libuuid1)",
+        "git"
+      ]
+    },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
@@ -220,6 +263,14 @@
           "!**/node_modules/**/_types/**",
           "!vendor/pi/package-lock.json"
         ]
+      },
+      {
+        "from": "apps/desktop/build/icon-pet.png",
+        "to": "icon.png"
+      },
+      {
+        "from": "apps/desktop/build/tray-pet.png",
+        "to": "tray.png"
       }
     ],
     "afterPack": "../../scripts/desktop-after-pack.mjs"

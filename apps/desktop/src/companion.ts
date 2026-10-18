@@ -24,6 +24,16 @@ function companionBounds(window: BrowserWindow): Rect {
   return process.platform === 'win32' ? window.getContentBounds() : window.getBounds()
 }
 
+/**
+ * The window is three character-widths wide and reserves the top for the
+ * speech bubble; only the middle third (bottom-aligned) is the visible pet.
+ * Keep those gutters transparent and out of the placement clamp.
+ */
+function visualInsets(width: number, height: number) {
+  const side = Math.round(width / 3)
+  return { left: side, right: side, top: Math.max(0, height - side), bottom: 0 }
+}
+
 export interface CompanionHandle {
   readonly window: BrowserWindow
   configureActivity(source: ActivitySource): void
@@ -47,18 +57,47 @@ export function createCompanion(owner: BrowserWindow): CompanionHandle | undefin
   let size = 220
   let enabled = true
   let saved: Partial<Rect> = {}
+  let savedOffset = { x: 0, y: 0 }
   try {
     const value = JSON.parse(readFileSync(statePath, 'utf8'))
     if ([170, 220, 280].includes(value.size)) size = value.size
     if (typeof value.enabled === 'boolean') enabled = value.enabled
     if (Number.isFinite(value.x) && Number.isFinite(value.y)) saved = { x: value.x, y: value.y }
+    if (Number.isFinite(value.offsetX) && Number.isFinite(value.offsetY)) savedOffset = { x: value.offsetX, y: value.offsetY }
   } catch { /* First launch or damaged launcher preference: use defaults. */ }
   const area = screen.getDisplayMatching(owner.getBounds()).workArea
   const width = Math.round(size * 2.7)
-  const initial = { x: saved.x ?? area.x + area.width - width - 24, y: saved.y ?? area.y + area.height - Math.round(size * 1.65) - 24, width, height: Math.round(size * 1.65) }
-  const bounds = settleCompanion(initial, screen.getDisplayMatching(initial).workArea, false)
+  const height = Math.round(size * 1.65)
+  const insets = visualInsets(width, height)
+  const visibleWidth = width - insets.left - insets.right
+  const initialVirtual = {
+    x: (saved.x ?? area.x + area.width - insets.left - visibleWidth - 24) + savedOffset.x,
+    y: (saved.y ?? area.y + area.height - height - 24) + savedOffset.y,
+    width,
+    height,
+  }
+  // Select the display by the visible character, not by the virtual window:
+  // a window shifted left to reach the edge can have a negative origin that
+  // getDisplayMatching resolves to the primary display.
+  const visibleRect = (bounds: Rect): Rect => {
+    const current = visualInsets(bounds.width, bounds.height)
+    return {
+      x: bounds.x + current.left,
+      y: bounds.y + current.top,
+      width: bounds.width - current.left - current.right,
+      height: bounds.height - current.top - current.bottom,
+    }
+  }
+  const initialArea = screen.getDisplayMatching(visibleRect(initialVirtual)).workArea
+  const settled = settleCompanion(initialVirtual, initialArea, false, insets)
+  // Some WMs clamp a window's left/top edge to the screen. Keep the native
+  // window inside the work area and translate the character inside it, so the
+  // visible pet can still reach the left and top edges.
+  const initialWindowX = Math.round(Math.max(initialArea.x, settled.x))
+  const initialWindowY = Math.round(Math.max(initialArea.y, settled.y))
+  let visualOffset = { x: settled.x - initialWindowX, y: settled.y - initialWindowY }
   const pet = new BrowserWindow({
-    x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height,
+    x: initialWindowX, y: initialWindowY, width: settled.width, height: settled.height,
     title: 'Alice', transparent: true, frame: false, hasShadow: false,
     // Frameless transparent Windows windows reserve a native border outside
     // the requested bounds unless their dimensions are content dimensions.
@@ -74,11 +113,11 @@ export function createCompanion(owner: BrowserWindow): CompanionHandle | undefin
   pet.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   pet.webContents.on('will-navigate', event => event.preventDefault())
   let ready = false
-  let flipped = bounds.flipped
+  let flipped = settled.flipped
   let reducedMotion = false
   let snapTimer: ReturnType<typeof setInterval> | undefined
   const stopSnap = () => { clearInterval(snapTimer); snapTimer = undefined }
-  let drag: { start: Electron.Point; bounds: Rect; moved: boolean } | undefined
+  let drag: { start: Electron.Point; bounds: Rect; offset: { x: number; y: number }; moved: boolean } | undefined
   const petSize = () => ({ width: Math.round(size * 2.7), height: Math.round(size * 1.65) })
   const inPositionRange = (value: number) =>
     Number.isFinite(value) && Math.round(value) >= -2_147_483_648 && Math.round(value) <= 2_147_483_647
@@ -93,18 +132,37 @@ export function createCompanion(owner: BrowserWindow): CompanionHandle | undefin
       return false
     }
   }
+  const publishOffset = () => {
+    if (!pet.isDestroyed()) pet.webContents.send('openalice:companion:offset', visualOffset)
+  }
+  const moveVirtual = (virtualX: number, virtualY: number, targetArea: Rect): boolean => {
+    const x = Math.round(Math.max(targetArea.x, virtualX))
+    const y = Math.round(Math.max(targetArea.y, virtualY))
+    const nextOffset = { x: virtualX - x, y: virtualY - y }
+    if (nextOffset.x !== visualOffset.x || nextOffset.y !== visualOffset.y) {
+      visualOffset = nextOffset
+      publishOffset()
+    }
+    return moveTo(x, y)
+  }
   const updateDrag = () => {
     if (!drag) return
     const cursor = screen.getCursorScreenPoint()
     const dx = cursor.x - drag.start.x, dy = cursor.y - drag.start.y
     if (dx * dx + dy * dy >= 9) drag.moved = true
-    if (drag.moved) moveTo(drag.bounds.x + dx, drag.bounds.y + dy)
+    if (!drag.moved) return
+    const virtualX = drag.bounds.x + drag.offset.x + dx
+    const virtualY = drag.bounds.y + drag.offset.y + dy
+    const targetArea = screen.getDisplayMatching(visibleRect({
+      x: virtualX, y: virtualY, width: drag.bounds.width, height: drag.bounds.height,
+    })).workArea
+    moveVirtual(virtualX, virtualY, targetArea)
   }
   let writeQueue = Promise.resolve()
   const save = () => {
     if (pet.isDestroyed()) return
     const { x, y } = companionBounds(pet)
-    const payload = JSON.stringify({ x, y, size, enabled })
+    const payload = JSON.stringify({ x, y, offsetX: visualOffset.x, offsetY: visualOffset.y, size, enabled })
     writeQueue = writeQueue.then(async () => {
       await writeFile(statePath + '.tmp', payload)
       await rename(statePath + '.tmp', statePath)
@@ -114,16 +172,21 @@ export function createCompanion(owner: BrowserWindow): CompanionHandle | undefin
     stopSnap()
     if (pet.isDestroyed()) return
     const current = companionBounds(pet)
-    const next = settleCompanion(current, screen.getDisplayMatching(current).workArea, snap)
+    const currentVirtual = { ...current, x: current.x + visualOffset.x, y: current.y + visualOffset.y }
+    const targetArea = screen.getDisplayMatching(visibleRect(currentVirtual)).workArea
+    const next = settleCompanion(currentVirtual, targetArea, snap, visualInsets(current.width, current.height))
     flipped = next.flipped
     pet.webContents.send('openalice:companion:flip', flipped)
-    if (!snap || reducedMotion) { if (moveTo(next.x, next.y)) save(); return }
+    if (!snap || reducedMotion) { moveVirtual(next.x, next.y, targetArea); save(); return }
     const start = performance.now()
+    const startX = currentVirtual.x, startY = currentVirtual.y
     snapTimer = setInterval(() => {
       const progress = Math.min(1, (performance.now() - start) / 160)
       const ease = snapEase(progress)
-      if (!moveTo(current.x + (next.x - current.x) * ease, current.y + (next.y - current.y) * ease)) return
-      if (progress === 1) { stopSnap(); if (moveTo(next.x, next.y)) save() }
+      const virtualX = startX + (next.x - startX) * ease
+      const virtualY = startY + (next.y - startY) * ease
+      if (!moveVirtual(virtualX, virtualY, targetArea)) return
+      if (progress === 1) { stopSnap(); moveVirtual(next.x, next.y, targetArea); save() }
     }, 16)
   }
   const open = () => { if (!owner.isDestroyed()) { if (owner.isMinimized()) owner.restore(); owner.show(); owner.focus() } }
@@ -214,10 +277,33 @@ export function createCompanion(owner: BrowserWindow): CompanionHandle | undefin
     ipcMain.on(channel, handler)
     pet.once('closed', () => ipcMain.removeListener(channel, handler))
   }
-  listen('ready', () => { ready = true; pet.webContents.send('openalice:companion:flip', flipped); if (enabled) pet.showInactive() })
+  listen('ready', () => {
+    ready = true
+    pet.webContents.send('openalice:companion:flip', flipped)
+    pet.webContents.send('openalice:companion:offset', visualOffset)
+    if (!enabled) return
+    pet.showInactive()
+    // Mutter places a newly mapped window on the active monitor and ignores
+    // the bounds passed to the constructor. A post-map move is honored, so
+    // re-apply the intended virtual position once the window is visible.
+    setTimeout(() => {
+      if (!enabled || drag || pet.isDestroyed()) return
+      moveVirtual(settled.x, settled.y, initialArea)
+      save()
+    }, 150)
+  })
   listen('reduced-motion', value => { if (typeof value === 'boolean') reducedMotion = value })
   listen('interactive', value => { if (typeof value === 'boolean') pet.setIgnoreMouseEvents(drag ? false : !value, { forward: true }) })
-  listen('begin-drag', () => { stopSnap(); drag = { start: screen.getCursorScreenPoint(), bounds: companionBounds(pet), moved: false }; pet.setIgnoreMouseEvents(false) })
+  listen('begin-drag', () => {
+    stopSnap()
+    drag = {
+      start: screen.getCursorScreenPoint(),
+      bounds: companionBounds(pet),
+      offset: { ...visualOffset },
+      moved: false,
+    }
+    pet.setIgnoreMouseEvents(false)
+  })
   listen('move-drag', updateDrag)
   listen('menu', () => menu().popup({ window: pet }))
   listen('open', open)
@@ -226,7 +312,14 @@ export function createCompanion(owner: BrowserWindow): CompanionHandle | undefin
     if (!trusted(event)) return false
     updateDrag()
     const moved = drag?.moved ?? false
-    if (drag && cancelled === true && !pet.isDestroyed()) setCompanionBounds(pet, drag.bounds)
+    if (drag && cancelled === true && !pet.isDestroyed()) {
+      const virtualX = drag.bounds.x + drag.offset.x
+      const virtualY = drag.bounds.y + drag.offset.y
+      const targetArea = screen.getDisplayMatching(visibleRect({
+        x: virtualX, y: virtualY, width: drag.bounds.width, height: drag.bounds.height,
+      })).workArea
+      moveVirtual(virtualX, virtualY, targetArea)
+    }
     drag = undefined
     if (moved && cancelled !== true) settle()
     return moved

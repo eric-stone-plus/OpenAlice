@@ -1,6 +1,17 @@
-import { BrowserWindow } from 'electron'
+import { app, BrowserWindow } from 'electron'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { configureWindowChrome, windowChromeOptions } from './window-chrome.js'
 import { createCompanion, type CompanionHandle } from './companion.js'
+
+const here = dirname(fileURLToPath(import.meta.url))
+
+/** Alice's app icon, copied to resources/icon.png by the Linux package. */
+function resolveWindowIcon(): string {
+  return app.isPackaged
+    ? join(process.resourcesPath, 'icon.png')
+    : join(here, '../../apps/desktop/build/icon-pet.png')
+}
 
 export interface AppWindow {
   readonly window: BrowserWindow
@@ -13,6 +24,7 @@ export function createAppWindow(preload: string, title = 'OpenAlice'): AppWindow
     width: 1280,
     height: 800,
     title,
+    ...(process.platform === 'linux' ? { icon: resolveWindowIcon() } : {}),
     ...windowChromeOptions(),
     webPreferences: { preload, contextIsolation: true, nodeIntegration: false, sandbox: false },
   })

@@ -11,7 +11,11 @@ export function exec(args: string[], cwd: string, options?: IGitStringExecutionO
 export function exec(args: string[], cwd: string, options: IGitBufferExecutionOptions): Promise<IGitBufferResult>
 export function exec(args: string[], cwd: string, options?: IGitExecutionOptions): Promise<IGitResult>
 export function exec(args: string[], cwd: string, options?: IGitExecutionOptions): Promise<IGitResult> {
-  if (!(globalThis as { __OPENALICE_BUN_STANDALONE__?: boolean }).__OPENALICE_BUN_STANDALONE__) {
+  const bunStandalone = (globalThis as { __OPENALICE_BUN_STANDALONE__?: boolean }).__OPENALICE_BUN_STANDALONE__ === true
+  // dugite's Linux bundle links git-remote-https against libcurl-gnutls, which
+  // Fedora does not ship, and the managed runtime already treats Linux as
+  // system-git territory. Use the same system executor as Bun standalone.
+  if (!bunStandalone && process.platform !== 'linux') {
     return bundledExec(args, cwd, options)
   }
   return execSystemGit(args, cwd, options)

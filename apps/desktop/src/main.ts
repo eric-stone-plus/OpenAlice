@@ -66,6 +66,39 @@ import { createAppWindow } from './app-window.js'
 import { configureWindowLifecycle, showAppWindow } from './window-lifecycle.js'
 import type { CompanionHandle } from './companion.js'
 import { CLI_VERSION, UpdateControlService, ClientUpdateService, WebRelay, readStartupTarget, writeStartupTarget, resolveLocalStartupHome, inspectLocalMachine } from './web-relay.js'
+import { installConsoleEpipeGuard } from './console-guard.js'
+
+// A closed terminal leaves stdout/stderr as a broken pipe. The guardian keeps
+// running after its launcher disappears, so swallow EPIPE instead of letting
+// Electron turn the next console write into a fatal main-process dialog.
+installConsoleEpipeGuard()
+
+// Electron 39 prefers native Wayland. The companion drag path depends on
+// screen.getCursorScreenPoint() and BrowserWindow.setBounds(), which Electron
+// documents as unsupported on Wayland, so run through XWayland when the
+// session provides one. Ozone is chosen before this script runs, so appendSwitch
+// is too late: relaunch once with the flag. An explicit --ozone-platform*
+// switch still wins.
+const ozonePlatformArg = process.argv.find(
+  arg => arg === '--ozone-platform'
+    || arg.startsWith('--ozone-platform=')
+    || arg === '--ozone-platform-hint'
+    || arg.startsWith('--ozone-platform-hint='),
+)
+if (
+  process.platform === 'linux'
+  && process.env.WAYLAND_DISPLAY
+  && process.env.DISPLAY
+  && ozonePlatformArg === undefined
+) {
+  app.relaunch({
+    // Inside an AppImage process.execPath points into the temporary mount,
+    // which disappears when this process exits; relaunch the image itself.
+    ...(process.env.APPIMAGE ? { execPath: process.env.APPIMAGE } : {}),
+    args: process.argv.slice(1).concat('--ozone-platform=x11'),
+  })
+  app.exit(0)
+}
 
 // The desktop launcher owns its mode for both relay and child Runtime readers.
 process.env.OPENALICE_RUNTIME_PROFILE = app.isPackaged ? 'electron-packaged' : 'electron-dev'
@@ -1662,6 +1695,13 @@ function shutdown(): void {
 }
 
 function resolveTrayIconPath(): string {
+  // The full-body companion reads as a tiny figure at tray size; Linux uses
+  // a dedicated 64px head crop with a light badge for the status bar.
+  if (process.platform === 'linux') {
+    return app.isPackaged
+      ? join(process.resourcesPath, 'tray.png')
+      : resolve(__dirname, '../../apps/desktop/build/tray-pet.png')
+  }
   return app.isPackaged
     ? join(process.resourcesPath, 'runtime/ui/dist/companion/alice.png')
     : resolve(__dirname, '../../ui/public/companion/alice.png')
@@ -1669,7 +1709,7 @@ function resolveTrayIconPath(): string {
 
 function createTray(win: BrowserWindow, companion?: CompanionHandle): void {
   const image = nativeImage.createFromPath(resolveTrayIconPath())
-  tray = new Tray(image.resize({ width: 22, height: 22 }))
+  tray = new Tray(image.resize({ width: 22, height: 22, quality: 'best' }))
   tray.setToolTip('OpenAlice')
 
   const show = () => {

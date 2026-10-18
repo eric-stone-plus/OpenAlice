@@ -24,4 +24,7 @@ contextBridge.exposeInMainWorld('companion', {
   onFlip: (callback: (flipped: boolean) => void) => {
     ipcRenderer.on('openalice:companion:flip', (_event, flipped) => callback(flipped))
   },
+  onOffset: (callback: (offset: { x: number; y: number }) => void) => {
+    ipcRenderer.on('openalice:companion:offset', (_event, offset) => callback(offset))
+  },
 })
