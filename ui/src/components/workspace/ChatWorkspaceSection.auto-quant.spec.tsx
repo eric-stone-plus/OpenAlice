@@ -265,6 +265,7 @@ describe.each(['auto-quant', 'prediction'] as const)('%s navigation readiness', 
     renderNavigation()
     const studio = screen.getByRole('button', { name: 'Studio' })
     expect(studio.getAttribute('aria-current')).toBe('page')
+    expect(studio.className).toContain('bg-sidebar-accent')
     expect(screen.getByRole('button', { name: `${name} Harness` }).getAttribute('aria-current')).toBeNull()
     fireEvent.click(studio)
     expect(actions.openOrFocus).toHaveBeenCalledWith(focused.spec)

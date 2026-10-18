@@ -7,7 +7,7 @@ it('binds a chosen provider to fresh Chat without launching an Agent', async () 
   vi.mocked(initializeChatWorkspace).mockResolvedValue({ id: 'chat-1' } as never)
   await prepareFirstChatProvider('mock-key', 'model-1')
   expect(updateWorkspaceRuntimeDefaults).toHaveBeenCalledWith('chat-1', {
-    interactive: { defaultAgent: 'pi', agents: { pi: { accessMode: 'vault', credentialSlug: 'mock-key', model: 'model-1' } } },
+    interactive: { defaultAgent: 'opencode', agents: { opencode: { accessMode: 'vault', credentialSlug: 'mock-key', model: 'model-1' } } },
     headless: { defaultAgent: null, agents: {} },
   })
 })

@@ -237,7 +237,7 @@ Recommendation: no.
 
 - Startup marks: process spawn -> server ready -> window painted -> first
   interactive frame.
-- CPU profiles of the server, the companion main process, and the renderer
+- CPU profiles of the server, the desktop main process, and the renderer
   during a realistic session.
 - PTY throughput and cold-attach snapshot time.
 - HTTP/WebSocket latency for the local relay.
@@ -344,12 +344,12 @@ Primary:
 
 Repository evidence:
 
-- `apps/desktop/src/main.ts`, `companion.ts`, `companion-preload.ts`,
-  `auto-update.ts`, `app-window.ts` - shell responsibilities and platform
-  behavior.
+- `apps/desktop/src/main.ts`, `auto-update.ts`, `app-window.ts` - shell
+  responsibilities and platform behavior.
 - `apps/desktop/package.json` - `electron@^39.8.5`.
 - `package.json` - Linux targets, publish feed, extra resources.
-- `dist/electron-app-pet/beta-linux.yml` - AppImage/deb/RPM update artifacts.
+- `dist/electron-app-pet/beta-linux.yml` - RPM update artifacts (the Linux
+  feed currently lists the RPM only).
 - `src/domain/analysis/indicator/functions/statistics.ts` and `technical.ts` -
   the EMA/MACD refactor.
 - `src/workspaces/headless-terminal-snapshot.ts` - per-byte ANSI mirror.

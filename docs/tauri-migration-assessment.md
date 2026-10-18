@@ -19,6 +19,10 @@ and packaging all need a Rust/Tauri implementation. A realistic estimate for
 one experienced engineer is **4–8 weeks**, plus platform testing, and the
 result would not automatically fix the Wayland companion-drag problem.
 
+> Historical note: the native companion window described below was removed.
+> Alice is now the welcome-screen pet (`ui/src/components/PetLogo.tsx`), so
+> the companion-window and Wayland-drag rows are no longer migration work.
+
 ## What is reusable
 
 - `ui/` — React + Vite renderer, components, styles, state.
@@ -32,7 +36,6 @@ result would not automatically fix the Wayland companion-drag problem.
 | --- | --- | --- |
 | Main process / guardian | `apps/desktop/src/main.ts` (~1,800 lines) | Rust `tauri::Builder`, process supervision, port probing, runtime locks |
 | Preload / IPC bridge | `apps/desktop/src/preload.ts`, `ipc.ts` | Tauri commands + events, capability-scoped permissions |
-| Companion window | `companion.ts`, `companion-preload.ts`, `ui/public/companion` | Tauri window + WebView, native hit-testing/click-through, tray menu |
 | Tray / menus | `createTray` in `main.ts` | Tauri tray API |
 | Window chrome | `window-chrome.ts` | Tauri window decorations / platform APIs |
 | Auto-update | `auto-update.ts`, `update-lifecycle.ts` | Tauri updater (different signing/feed format) |

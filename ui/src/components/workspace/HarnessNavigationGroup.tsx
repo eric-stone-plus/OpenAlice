@@ -1,16 +1,20 @@
 import { type ReactNode } from 'react'
-import { Plus } from 'lucide-react'
+import { Layers, Plus } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip'
 
 /** One office in the primary navigation, not a tree of all Workspaces. */
-export function HarnessNavigationGroup({ title, compact, compactIcon, active, newLabel, showNewAction = true, onOpen, menu, children }: {
+export function HarnessNavigationGroup({ title, compact, compactIcon, active, newLabel, showNewAction = true, studio, onOpen, menu, children }: {
   title: string
   compact: boolean
   compactIcon: ReactNode
   active: boolean
   newLabel: string
   showNewAction?: boolean
+  /** Studio drill-down for this harness, rendered as a row action so the
+   *  navigation stays one row per harness instead of a title plus a duplicate
+   *  child row. */
+  studio?: { active: boolean; onOpen: () => void }
   onOpen: () => void
   menu: ReactNode
   children: ReactNode
@@ -37,6 +41,15 @@ export function HarnessNavigationGroup({ title, compact, compactIcon, active, ne
           <span className="truncate">{title}</span>
         </button>
         <div className="oa-harness-nav-actions flex shrink-0 items-center pr-1">
+          {studio && (
+            <Tooltip>
+              <TooltipTrigger render={<button type="button" aria-label={t('harnessSurface.studio')} aria-current={studio.active ? 'page' : undefined} onClick={studio.onOpen}
+                className={`oa-icon-action flex h-8 w-7 shrink-0 items-center justify-center rounded-md ${studio.active ? 'bg-sidebar-accent text-sidebar-accent-foreground' : 'text-muted-foreground hover:bg-sidebar-accent hover:text-foreground'}`}>
+                <Layers size={14} aria-hidden />
+              </button>} />
+              <TooltipContent side="right">{t('harnessSurface.studio')}</TooltipContent>
+            </Tooltip>
+          )}
           {menu}
           {showNewAction && <button type="button" aria-label={`${title}: ${newLabel}`} title={newLabel} onClick={onOpen}
             className="oa-icon-action flex h-8 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-foreground">

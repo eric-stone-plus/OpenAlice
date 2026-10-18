@@ -436,4 +436,28 @@ describe('OpenAlice global + legacy lock composition', () => {
     expect(controller.signals).toEqual([{ pid: 100, signal: 'SIGTERM' }])
     expect(controller.isAlive(101)).toBe(false)
   })
+
+  it('terminates a live orphan before reclaiming its stale lock', async () => {
+    controller.add(201, 20_000)
+    controller.add(301, 30_000)
+    const lockDir = runtimeLockDir(home)
+    await acquireRuntimeLock(lockDir, {
+      pid: 201,
+      processStartedAt: 20_000,
+      guardianPid: 301,
+      guardianStartedAt: 30_000,
+      heartbeatMs: 0,
+      processController: controller,
+    })
+    controller.alive.set(301, false)
+
+    await prepareOpenAliceRuntime({
+      userDataHome: home,
+      launcherRoot: join(home, 'workspaces'),
+      processController: controller,
+    })
+
+    expect(controller.isAlive(201)).toBe(false)
+    expect(controller.signals).toContainEqual({ pid: 201, signal: 'SIGTERM' })
+  })
 })

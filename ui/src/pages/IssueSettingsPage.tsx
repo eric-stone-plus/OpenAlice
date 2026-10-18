@@ -4,6 +4,7 @@ import { PageHeader } from '../components/PageHeader'
 import { SaveIndicator } from '../components/SaveIndicator'
 import { useWorkspaces } from '../contexts/workspaces-context'
 import { AgentRuntimeIcon } from '../lib/agentRuntimeIcon'
+import { visibleAgentRuntimes } from '../lib/agentRuntimeVisibility'
 import { SessionTakeoverSettings } from '../components/workspace/SessionTakeoverDialog'
 import { useTranslation } from 'react-i18next'
 
@@ -15,11 +16,15 @@ export function IssueSettingsPage() {
   const runtimeDescriptionId = `${runtimeSelectId}-description`
 
   const runtimeAgents = useMemo(
-    () => agents.filter((agent) => agent.kind !== 'utility'),
+    () => visibleAgentRuntimes(agents).filter((agent) => agent.kind !== 'utility'),
     [agents],
   )
   const installationDefault = defaultAgent
     ? runtimeAgents.find((agent) => agent.id === defaultAgent)
+    : null
+  const visibleIssueDefault = issueDefaultAgent
+    && runtimeAgents.some((agent) => agent.id === issueDefaultAgent)
+    ? issueDefaultAgent
     : null
 
   const save = async (next: string | null) => {
@@ -55,13 +60,13 @@ export function IssueSettingsPage() {
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                 <div className="relative flex-1">
                   <AgentRuntimeIcon
-                    agentId={issueDefaultAgent ?? installationDefault?.id}
+                    agentId={visibleIssueDefault ?? installationDefault?.id}
                     className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
                   />
                   <select
                     id={runtimeSelectId}
                     aria-describedby={runtimeDescriptionId}
-                    value={issueDefaultAgent ?? ''}
+                    value={visibleIssueDefault ?? ''}
                     disabled={status === 'saving'}
                     onChange={(event) => void save(event.target.value || null)}
                     className={`${inputClass} pl-9`}

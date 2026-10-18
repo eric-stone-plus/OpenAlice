@@ -59,13 +59,6 @@ interface Window {
         open(displayId: string): Promise<boolean>
         dismiss(displayId: string): Promise<boolean>
       }
-      getSound(): Promise<PetSoundSettings>
-      updateSound(settings: Partial<PetSoundSettings>): Promise<PetSoundSettings>
-      resetSound(): Promise<PetSoundSettings>
-      onSound(callback: (settings: PetSoundSettings) => void): () => void
-      getVisible(): Promise<boolean>
-      toggle(): Promise<boolean>
-      onVisibility(callback: (visible: boolean) => void): () => void
     }
     readonly windowChrome?: {
       readonly platform: string
@@ -166,12 +159,6 @@ interface OpenAliceDataHomeStatus {
   readonly askOnStartup: boolean
   readonly selectionLocked: boolean
   readonly selectionLock: 'openalice-home-env' | 'workspace-root-env' | null
-}
-
-interface PetSoundSettings {
-  enabled: boolean
-  volume: number
-  source: { name: string; dataUrl: string } | null
 }
 
 interface OpenAliceDataHomeActionResult {

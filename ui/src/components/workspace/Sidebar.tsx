@@ -19,6 +19,7 @@ import { orderSessionsForSidebar, orderWorkspacesForSidebar, workspaceActivityMs
 import { useReorderMotion } from './useReorderMotion';
 import { SidebarActionMenu } from './SidebarActionMenu';
 import { AgentRuntimeIcon } from '../../lib/agentRuntimeIcon';
+import { visibleAgentRuntimes } from '../../lib/agentRuntimeVisibility';
 import { SelectionIndicator } from '../SelectionIndicator';
 import { projectHeadlessTaskPresentation } from './headless-task-presentation';
 import { Button } from '../ui/button';
@@ -325,11 +326,14 @@ export function WorkspaceRow(props: WorkspaceRowProps): ReactElement {
   const [spawnMenuOpen, setSpawnMenuOpen] = useState(false);
   const spawnControlsRef = useRef<HTMLDivElement | null>(null);
   const menuRef = useRef<HTMLUListElement | null>(null);
-  const runtimeAgents = props.agents.filter((a) => a.kind !== 'utility');
+  const runtimeAgents = visibleAgentRuntimes(props.agents).filter((a) => a.kind !== 'utility');
   const utilityAgents = props.agents.filter((a) => a.kind === 'utility');
-  const defaultAgentEnabled =
-    props.defaultAgent !== null &&
-    runtimeAgents.some((a) => a.id === props.defaultAgent);
+  const defaultRuntimeAgent = props.defaultAgent === null
+    ? null
+    : runtimeAgents.some((a) => a.id === props.defaultAgent)
+      ? props.defaultAgent
+      : runtimeAgents[0]?.id ?? null;
+  const defaultAgentEnabled = defaultRuntimeAgent !== null;
 
   useEffect(() => {
     if (!spawnMenuOpen) return;
@@ -352,8 +356,8 @@ export function WorkspaceRow(props: WorkspaceRowProps): ReactElement {
   }, [spawnMenuOpen]);
 
   const onPlusClick = (): void => {
-    if (defaultAgentEnabled && props.defaultAgent) {
-      props.onSpawn(w.id, { agent: props.defaultAgent });
+    if (defaultAgentEnabled && defaultRuntimeAgent) {
+      props.onSpawn(w.id, { agent: defaultRuntimeAgent });
       return;
     }
     setSpawnMenuOpen((v) => !v);
@@ -365,8 +369,8 @@ export function WorkspaceRow(props: WorkspaceRowProps): ReactElement {
   };
 
   const plusTitle =
-    defaultAgentEnabled && props.defaultAgent
-      ? t('workspace.spawnAgent', { agent: agentLabel(props.defaultAgent, props.agents) })
+    defaultAgentEnabled && defaultRuntimeAgent
+      ? t('workspace.spawnAgent', { agent: agentLabel(defaultRuntimeAgent, props.agents) })
       : t('workspace.spawn');
   const chooserTitle = t('workspace.chooseAgent');
 

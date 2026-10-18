@@ -65,7 +65,8 @@ import { exitDesktopProcess } from './app-exit.js'
 import { createAppWindow } from './app-window.js'
 import { configureWindowLifecycle, showAppWindow } from './window-lifecycle.js'
 import { clearShutdownMarker, writeShutdownMarker } from './shutdown-marker.js'
-import type { CompanionHandle } from './companion.js'
+import { clearStaleRuntimeState } from './runtime-state-cleanup.js'
+import { installCompanionActivity } from './companion-activity.js'
 import { CLI_VERSION, UpdateControlService, ClientUpdateService, WebRelay, readStartupTarget, writeStartupTarget, resolveLocalStartupHome, inspectLocalMachine } from './web-relay.js'
 import { installConsoleEpipeGuard } from './console-guard.js'
 
@@ -74,12 +75,11 @@ import { installConsoleEpipeGuard } from './console-guard.js'
 // Electron turn the next console write into a fatal main-process dialog.
 installConsoleEpipeGuard()
 
-// Electron 39 prefers native Wayland. The companion drag path depends on
-// screen.getCursorScreenPoint() and BrowserWindow.setBounds(), which Electron
-// documents as unsupported on Wayland, so run through XWayland when the
-// session provides one. Ozone is chosen before this script runs, so appendSwitch
-// is too late: relaunch once with the flag. An explicit --ozone-platform*
-// switch still wins.
+// Electron 39 prefers native Wayland. Keep the proven X11 window path when the
+// session provides XWayland: native placement and transparency were validated
+// there, and Ozone is chosen before this script runs. appendSwitch is too late,
+// so relaunch once with the flag. An explicit --ozone-platform* switch still
+// wins.
 const ozonePlatformArg = process.argv.find(
   arg => arg === '--ozone-platform'
     || arg.startsWith('--ozone-platform=')
@@ -114,6 +114,9 @@ let appQuitting = false
 // The data home whose locks this process holds; the shutdown marker is written
 // there so a relaunch that races the quit can wait for the release.
 let shutdownHome: string | null = null
+// The workspace root that owns the live runtime lock; captured for the
+// module-level shutdown path so the crash safety net can inspect both locks.
+let shutdownLauncherRoot: string | null = null
 let tray: Tray | null = null
 let restartingUTA = false
 let restartingConnector = false
@@ -164,6 +167,25 @@ async function releaseGuardianRuntimeLock(): Promise<void> {
       `runtime lock release failed: ${error instanceof Error ? error.stack ?? error.message : String(error)}`,
     )
   })
+}
+
+/**
+ * Child stdio is piped through the guardian: a long-lived child must never
+ * inherit the launching terminal's stdout/stderr, or closing that terminal
+ * delivers EPIPE straight into the child. The guardian's own writes are
+ * best-effort and mirrored into the diagnostic log.
+ */
+function forwardChildOutput(child: ChildProcess, label: string): void {
+  const forward = (stream: NodeJS.ReadableStream | null, channel: 'stdout' | 'stderr'): void => {
+    stream?.on('data', (chunk: Buffer) => {
+      try {
+        (channel === 'stdout' ? process.stdout : process.stderr).write(chunk)
+      } catch { /* the launching terminal may already be gone */ }
+      desktopDiagnostics?.write(`${label}:${channel}`, chunk)
+    })
+  }
+  forward(child.stdout, 'stdout')
+  forward(child.stderr, 'stderr')
 }
 
 protocol.registerSchemesAsPrivileged([
@@ -584,13 +606,14 @@ function configureDesktopUpdates(win: BrowserWindow, updateAttemptPath: string):
  * and update IPC. Project-owned file/PT Y capabilities are never registered. */
 async function startDesktopLauncher(repoRoot: string, updateAttemptPath: string, startupError?: unknown): Promise<void> {
   localRuntimeSuspended = true
-  const { window: win, companion } = createAppWindow(resolve(__dirname, 'preload.js'))
+  const { window: win } = createAppWindow(resolve(__dirname, 'preload.js'))
+  const activity = startActivity(win)
   const clientUpdates = configureDesktopUpdates(win, updateAttemptPath)
   const relay = new WebRelay({ clientUpdates, uiRoot: app.isPackaged ? join(process.resourcesPath, 'runtime', 'ui', 'dist') : join(repoRoot, 'ui', 'dist') })
   desktopRelay = relay
   await relay.listen()
-  createTray(win, companion)
-  companion?.configureActivity({
+  createTray(win)
+  activity?.configure({
     identity: () => !relay.status.switching && relay.status.target ? JSON.stringify([relay.originUrl, relay.status.generation, relay.status.target.machine, relay.status.target.project]) : null,
     read: async (query, signal) => { const response = await win.webContents.session.fetch(`${relay.originUrl}/api/agent-runtime${query}`, { signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15_000)]) : AbortSignal.timeout(15_000) }); if (!response.ok) throw new Error('Activity unavailable'); return response.json() },
   })
@@ -796,6 +819,7 @@ app.whenReady().then(async () => {
   // process can mutate the selected store. An unlocked desktop launch can
   // choose a different complete home instead of killing the existing owner.
   let launcherRoot = process.env['AQ_LAUNCHER_ROOT']?.trim() || join(userDataHome, 'workspaces')
+  shutdownLauncherRoot = launcherRoot
   let takeover = takeoverRequested()
   const guardianStartedAt = currentProcessStartedAt()
   while (!takeover) {
@@ -951,8 +975,9 @@ app.whenReady().then(async () => {
         ...runtimeEnv,
         ...proxyEnv,
       },
-      stdio: 'inherit',
+      stdio: ['inherit', 'pipe', 'pipe'],
     })
+    forwardChildOutput(child, 'uta')
     child.once('exit', (code, signal) => {
       if (appQuitting || localRuntimeSuspended || restartingUTA) return
       console.error(`[guardian] UTA exited unexpectedly code=${code} signal=${signal} — trading offline, app stays up`)
@@ -976,8 +1001,9 @@ app.whenReady().then(async () => {
         ...runtimeEnv,
         ...proxyEnv,
       },
-      stdio: 'inherit',
+      stdio: ['inherit', 'pipe', 'pipe'],
     })
+    forwardChildOutput(child, 'connector')
     child.once('exit', (code, signal) => {
       if (appQuitting || localRuntimeSuspended || restartingConnector) return
       console.error(`[guardian] Connector exited unexpectedly code=${code} signal=${signal} — external notifications offline, app stays up`)
@@ -1011,11 +1037,19 @@ app.whenReady().then(async () => {
       // The fourth fd opens Node child_process IPC. Electron app mode uses it
       // as the local PTY transport between BrowserWindow/preload and Alice's
       // WorkspaceService, while HTTP/WS remains the browser/dev/Docker plane.
-      stdio: ['inherit', 'inherit', 'pipe', 'ipc'],
+      stdio: ['inherit', 'pipe', 'pipe', 'ipc'],
       serialization: 'advanced',
     })
+    child.stdout?.on('data', (chunk: Buffer) => {
+      try {
+        process.stdout.write(chunk)
+      } catch { /* the launching terminal may already be gone */ }
+      desktopDiagnostics?.write('alice:stdout', chunk)
+    })
     child.stderr?.on('data', (chunk: Buffer) => {
-      process.stderr.write(chunk)
+      try {
+        process.stderr.write(chunk)
+      } catch { /* the launching terminal may already be gone */ }
       aliceStderrTail.append(chunk)
       desktopDiagnostics?.write('alice:stderr', chunk)
     })
@@ -1156,9 +1190,10 @@ app.whenReady().then(async () => {
   )
 
   let modeSwitching = false
-  const { window: win, companion } = createAppWindow(resolve(__dirname, 'preload.js'))
-  createTray(win, companion)
-  companion?.configureActivity({
+  const { window: win } = createAppWindow(resolve(__dirname, 'preload.js'))
+  const activity = startActivity(win)
+  createTray(win)
+  activity?.configure({
     identity: () => {
       if (modeSwitching) return null
       if (!localRuntimeSuspended && win.webContents.getURL().startsWith('app://openalice/')) return `integrated:${userDataHome}`
@@ -1704,23 +1739,29 @@ function shutdown(): void {
   // the SIGTERM grace window waits for this process to release its locks
   // instead of reporting another instance as healthy.
   if (shutdownHome) writeShutdownMarker(shutdownHome)
-  void stopChildren().finally(async () => {
-    await desktopRelay?.close().catch((error) => console.error('[guardian] relay close failed:', error))
-    desktopRelay = null
-    await releaseGuardianRuntimeLock().catch((error) => console.error('[guardian] runtime lock release failed:', error))
-    if (shutdownHome) clearShutdownMarker(shutdownHome)
-    const exitCode = typeof process.exitCode === 'number' ? process.exitCode : 0
-    console.log(`[guardian] shutdown complete → exit ${exitCode}`)
-    exitDesktopProcess(exitCode, {
-      appExit: (code) => app.exit(code),
-      processExit: (code) => process.exit(code),
+  void stopChildren()
+    .catch((error) => console.error('[guardian] child shutdown failed:', error))
+    .finally(async () => {
+      await desktopRelay?.close().catch((error) => console.error('[guardian] relay close failed:', error))
+      desktopRelay = null
+      if (shutdownHome && shutdownLauncherRoot) {
+        await clearStaleRuntimeState(shutdownHome, shutdownLauncherRoot, alice?.pid)
+          .catch((error) => console.error('[guardian] stale runtime state cleanup failed:', error))
+      }
+      await releaseGuardianRuntimeLock().catch((error) => console.error('[guardian] runtime lock release failed:', error))
+      if (shutdownHome) clearShutdownMarker(shutdownHome)
+      const exitCode = typeof process.exitCode === 'number' ? process.exitCode : 0
+      console.log(`[guardian] shutdown complete → exit ${exitCode}`)
+      exitDesktopProcess(exitCode, {
+        appExit: (code) => app.exit(code),
+        processExit: (code) => process.exit(code),
+      })
     })
-  })
 }
 
 function resolveTrayIconPath(): string {
-  // The full-body companion reads as a tiny figure at tray size; Linux uses
-  // a dedicated 64px head crop with a light badge for the status bar.
+  // Alice's artwork reads as a tiny figure at tray size; Linux uses a
+  // dedicated 64px head crop with a light badge for the status bar.
   if (process.platform === 'linux') {
     return app.isPackaged
       ? join(process.resourcesPath, 'tray.png')
@@ -1731,7 +1772,17 @@ function resolveTrayIconPath(): string {
     : resolve(__dirname, '../../ui/public/companion/alice.png')
 }
 
-function createTray(win: BrowserWindow, companion?: CompanionHandle): void {
+/** Activity notifications are optional; a broken preference store must not block the window. */
+function startActivity(win: BrowserWindow): ReturnType<typeof installCompanionActivity> | undefined {
+  try {
+    return installCompanionActivity(win)
+  } catch (error) {
+    console.error('[activity] startup failed:', error)
+    return undefined
+  }
+}
+
+function createTray(win: BrowserWindow): void {
   const image = nativeImage.createFromPath(resolveTrayIconPath())
   tray = new Tray(image.resize({ width: 22, height: 22, quality: 'best' }))
   tray.setToolTip('OpenAlice')
@@ -1741,9 +1792,6 @@ function createTray(win: BrowserWindow, companion?: CompanionHandle): void {
   }
   const trayMenu = () => Menu.buildFromTemplate([
     { label: 'Show OpenAlice', click: show },
-    ...(companion && !companion.window.isDestroyed()
-      ? [{ label: 'Pet', submenu: companion.trayMenuItems() }]
-      : []),
     { type: 'separator' },
     { label: 'Quit', click: () => app.quit() },
   ])
@@ -1753,9 +1801,11 @@ function createTray(win: BrowserWindow, companion?: CompanionHandle): void {
 }
 
 app.on('before-quit', (e) => {
-  if (appQuitting) return
+  // Always hold the quit until children and locks are gone. A second quit
+  // request must not let Electron exit while shutdown is still running; the
+  // final app.exit() in shutdown() is the only path out.
   e.preventDefault()
-  shutdown()
+  if (!appQuitting) shutdown()
 })
 
 // Logout, `kill`, and Ctrl+C must release the data locks and stop children

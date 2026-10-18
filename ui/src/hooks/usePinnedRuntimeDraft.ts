@@ -180,6 +180,7 @@ export function usePinnedRuntimeDraft({
     workspaceId,
     hasWorkspace: true,
     managedWorkspaceLaunch: true,
+    allowHiddenAgent: true,
   })
 
   const toRuntimeUpdate = useCallback(

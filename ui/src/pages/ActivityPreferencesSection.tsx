@@ -14,7 +14,7 @@ export function ActivityPreferencesSection() {
   return <ConfigSection title={t('activityPreferences.title')} description={t('activityPreferences.description')}>
     {prefs.loading ? <p role="status">{t('pet.loading')}</p> : !settings ? <p className="text-sm text-muted-foreground">{t('activityPreferences.desktopOnly')}</p> :
       <div className="space-y-4">
-        {(['enabled', 'main', 'pet', 'brief'] as const).map(key => <div key={key} className="flex items-center justify-between gap-4">
+        {(['enabled', 'main'] as const).map(key => <div key={key} className="flex items-center justify-between gap-4">
           <label htmlFor={`activity-${key}`} className="text-sm">{t(`activityPreferences.${key}`)}</label>
           <Toggle id={`activity-${key}`} checked={settings[key]} disabled={prefs.pending} ariaLabel={t(`activityPreferences.${key}`)} onChange={value => { void prefs.update({ [key]: value }) }} />
         </div>)}

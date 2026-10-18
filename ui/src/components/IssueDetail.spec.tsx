@@ -95,6 +95,20 @@ vi.mock('../contexts/workspaces-context', () => ({
           aiProvider: { credentialSource: 'runtime-or-workspace', wirePreference: ['openai-chat'] },
         },
       },
+      {
+        id: 'opencode',
+        displayName: 'opencode',
+        kind: 'agent',
+        installed: true,
+        capabilities: {
+          parallelPerCwd: true,
+          resumeLast: true,
+          resumeById: true,
+          transcriptDiscovery: 'none',
+          headless: true,
+          aiProvider: { credentialSource: 'runtime-or-workspace', wirePreference: ['openai-chat'] },
+        },
+      },
     ],
     defaultAgent: 'pi',
     issueDefaultAgent: null,
@@ -394,7 +408,7 @@ describe('IssueDetail property controls', () => {
 
     expect(screen.getByRole('combobox', { name: 'Runtime' })).toBeTruthy()
     expect(screen.queryByRole('combobox', { name: 'Run timeout' })).toBeNull()
-    expect(screen.getByRole('button', { name: 'Configure codex' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Configure opencode' })).toBeTruthy()
     expect(screen.getByRole('heading', { level: 3, name: 'Schedule' })).toBeTruthy()
     expect(screen.getByRole('heading', { name: 'Agent', level: 3 })).toBeTruthy()
     const commentBehavior = screen.getByRole('button', { name: 'Comment behavior' })

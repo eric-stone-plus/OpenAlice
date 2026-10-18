@@ -11,6 +11,7 @@ import { installHintFor } from '../components/workspace/agentInstall'
 import type { AgentInfo, AgentRuntimeReadinessRow } from '../components/workspace/api'
 import { useAgentRuntimes } from '../hooks/useAgentRuntimes'
 import { canAddAgentRuntimeQuickAccess } from '../lib/agentRuntimeQuickAccess'
+import { visibleAgentRuntimes } from '../lib/agentRuntimeVisibility'
 import { AgentRuntimeIcon } from '../lib/agentRuntimeIcon'
 import { agentRuntimeSettingsStatusKey } from '../lib/agentRuntimeReadiness'
 
@@ -59,8 +60,8 @@ const REPAIR_KEYS = {
 export function AgentRuntimesSettingsPage() {
   const { t } = useTranslation()
   const {
-    catalog,
-    quickAccessIds,
+    catalog: discoveredCatalog,
+    quickAccessIds: storedQuickAccessIds,
     readiness,
     loading,
     refreshing,
@@ -68,6 +69,11 @@ export function AgentRuntimesSettingsPage() {
     refresh,
     saveQuickAccess,
   } = useAgentRuntimes()
+  const catalog = useMemo(() => visibleAgentRuntimes(discoveredCatalog), [discoveredCatalog])
+  const quickAccessIds = useMemo(
+    () => storedQuickAccessIds.filter((id) => catalog.some((agent) => agent.id === id)),
+    [catalog, storedQuickAccessIds],
+  )
   const [query, setQuery] = useState('')
   const [saving, setSaving] = useState(false)
 

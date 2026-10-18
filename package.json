@@ -196,6 +196,9 @@
         "rpm",
         "tar.gz"
       ],
+      "executableArgs": [
+        "--ozone-platform=x11"
+      ],
       "category": "Office;Finance",
       "packageCategory": "misc",
       "icon": "apps/desktop/build/icons",
@@ -273,7 +276,7 @@
         "to": "tray.png"
       }
     ],
-    "afterPack": "../../scripts/desktop-after-pack.mjs"
+    "afterPack": "scripts/desktop-after-pack.mjs"
   },
   "devDependencies": {
     "@ai-sdk/provider": "^3.0.8",

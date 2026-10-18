@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
   MANAGER_WORKSPACE_ID,
+  type AgentInfo,
   type ManagerWorkspaceSnapshot,
   type SessionRecord,
   type Workspace,
@@ -231,6 +232,40 @@ beforeEach(async () => {
 afterEach(cleanup)
 
 describe('WorkspacesProvider conversation routing', () => {
+  it('keeps the full inventory for sessions while a hidden saved default falls back', async () => {
+    mocks.listAgents.mockResolvedValue([
+      {
+        id: 'pi',
+        displayName: 'Pi',
+        kind: 'agent',
+        installed: true,
+        capabilities: { parallelPerCwd: false, resumeLast: false, resumeById: false, transcriptDiscovery: 'none' },
+      },
+      {
+        id: 'opencode',
+        displayName: 'OpenCode',
+        kind: 'agent',
+        installed: true,
+        capabilities: { parallelPerCwd: false, resumeLast: false, resumeById: false, transcriptDiscovery: 'none' },
+      },
+    ] as AgentInfo[])
+    mocks.getWorkspaceDefaultAgent.mockResolvedValue('pi')
+    function InventoryProbe() {
+      const ctx = useWorkspaces()
+      return <span data-testid="inventory">{ctx.agents.map((agent) => agent.id).join(',')}:{ctx.defaultAgent}</span>
+    }
+
+    render(
+      <ToastProvider>
+        <WorkspacesProvider>
+          <InventoryProbe />
+        </WorkspacesProvider>
+      </ToastProvider>,
+    )
+
+    await waitFor(() => expect(screen.getByTestId('inventory').textContent).toBe('pi,opencode:opencode'))
+  })
+
   it('adopts an explicit Web surface returned by quick-chat', async () => {
     mocks.listWorkspaces
       .mockResolvedValueOnce([workspace()])

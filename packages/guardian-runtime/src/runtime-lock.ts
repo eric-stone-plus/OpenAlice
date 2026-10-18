@@ -169,6 +169,17 @@ export async function inspectRuntimeLock(
   if (!(await isSameProcess(owner.pid, owner.processStartedAt, controller))) {
     return inspection(lockDir, 'stale', owner, heartbeatAgeMs, heartbeatStale, directoryIdentity, 'owner pid has been reused')
   }
+  // A desktop-owned runtime is only healthy while its guardian is alive. If
+  // the guardian crashed, the Alice child is an orphan: the lock must be
+  // reclaimable instead of blocking the next launch as "another desktop".
+  if (owner.guardianPid && owner.guardianPid !== process.pid) {
+    if (!controller.isAlive(owner.guardianPid)) {
+      return inspection(lockDir, 'stale', owner, heartbeatAgeMs, heartbeatStale, directoryIdentity, 'guardian process is not running')
+    }
+    if (!(await isSameProcess(owner.guardianPid, owner.guardianStartedAt, controller))) {
+      return inspection(lockDir, 'stale', owner, heartbeatAgeMs, heartbeatStale, directoryIdentity, 'guardian pid has been reused')
+    }
+  }
   return inspection(
     lockDir,
     'active',
@@ -219,6 +230,21 @@ export async function acquireRuntimeLock(
     }
     if (current.state === 'active') {
       if (!opts.takeover || !current.owner) throw new RuntimeAlreadyRunningError(current)
+      await recoverRuntimeOwner(current.owner, { processController: controller })
+      await controller.sleep(25)
+      continue
+    }
+
+    // A stale lock can still have a live owner: a desktop runtime whose
+    // guardian died. Terminate that orphan before reclaiming the lock, or a
+    // new guardian would start a second Alice against the same data store.
+    // A reused pid is deliberately left alone: it is not the same process.
+    if (
+      current.state === 'stale'
+      && current.owner
+      && controller.isAlive(current.owner.pid)
+      && await isSameProcess(current.owner.pid, current.owner.processStartedAt, controller)
+    ) {
       await recoverRuntimeOwner(current.owner, { processController: controller })
       await controller.sleep(25)
       continue
@@ -283,11 +309,22 @@ export async function acquireGuardianRuntime(opts: GuardianRuntimeOptions): Prom
  * The next Alice process performs the atomic stale-lock reclamation itself.
  */
 export async function prepareOpenAliceRuntime(opts: PrepareOpenAliceRuntimeOptions): Promise<RuntimeLockInspection[]> {
+  const controller = opts.processController ?? defaultProcessController
   const inspections = await inspectOpenAliceRuntime(opts)
   const active = dedupeOwners(inspections.filter((row) => row.state === 'active' && row.owner !== null))
   if (active.length > 0 && !opts.takeover) throw new RuntimeAlreadyRunningError(active[0]!)
   for (const row of active) {
     await recoverRuntimeOwner(row.owner!, { processController: opts.processController })
+  }
+  // A desktop runtime whose guardian died is stale but still alive. It must
+  // be terminated before its lock is reclaimed; a reused pid is not ours and
+  // is left untouched.
+  const staleLive = dedupeOwners(inspections.filter((row) => row.state === 'stale' && row.owner !== null))
+  for (const row of staleLive) {
+    const owner = row.owner!
+    if (!controller.isAlive(owner.pid)) continue
+    if (!(await isSameProcess(owner.pid, owner.processStartedAt, controller))) continue
+    await recoverRuntimeOwner(owner, { processController: opts.processController })
   }
   return inspections
 }

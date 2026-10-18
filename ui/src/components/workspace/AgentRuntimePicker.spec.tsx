@@ -81,6 +81,24 @@ describe('AgentRuntimePicker', () => {
     expect(screen.getByRole('menuitem', { name: i18n.t('chatLanding.otherRuntimes') })).toBeTruthy()
   })
 
+  it('does not render the Other runtimes gateway when every visible runtime is already primary', async () => {
+    const user = userEvent.setup()
+    const openCode = agent('opencode', 'OpenCode')
+    render(
+      <AgentRuntimePicker
+        agents={[openCode]}
+        primary={[openCode]}
+        selectedId="opencode"
+        readiness={readiness}
+        onSelect={vi.fn()}
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: i18n.t('chatLanding.selectAgent') }))
+    expect(await screen.findByRole('menuitem', { name: /OpenCode/ })).toBeTruthy()
+    expect(screen.queryByRole('menuitem', { name: i18n.t('chatLanding.otherRuntimes') })).toBeNull()
+  })
+
   it('shows a disabled current-selection row for an uninstalled outsider without changing shortcuts', async () => {
     const user = userEvent.setup()
     const onSelect = vi.fn()

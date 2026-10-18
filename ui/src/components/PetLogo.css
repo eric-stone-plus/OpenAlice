@@ -1,0 +1,38 @@
+.oa-pet-logo__art {
+  animation: oa-pet-float 4.2s ease-in-out infinite;
+  transition: transform 180ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.oa-pet-logo:focus-within .oa-pet-logo__art {
+  animation-play-state: paused;
+  transform: scale(1.04);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .oa-pet-logo:hover .oa-pet-logo__art {
+    animation-play-state: paused;
+    transform: scale(1.04);
+  }
+}
+
+.oa-pet-logo__button:active .oa-pet-logo__art {
+  transform: scale(0.94);
+}
+
+@keyframes oa-pet-float {
+  0%,
+  100% {
+    translate: 0 0;
+  }
+
+  50% {
+    translate: 0 -4px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .oa-pet-logo__art {
+    animation: none;
+    transition: none;
+  }
+}

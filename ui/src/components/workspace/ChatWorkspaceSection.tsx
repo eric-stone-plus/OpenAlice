@@ -371,6 +371,10 @@ export function ChatWorkspaceSection({
     : t(mode === 'auto-quant' ? 'nav.item.autoQuant' : 'nav.item.autoPrediction')
   const studioActive = focused?.kind === 'harness-surface' && focused.params.source === source
     && focused.params.wsId === currentWorkspace?.id && focused.params.capability === 'studio'
+  const studioAction = mode !== 'chat' && navigationLoaded && !navigationError && currentWorkspace ? {
+    active: studioActive,
+    onOpen: () => navigate({ kind: 'harness-surface', params: { wsId: currentWorkspace.id, capability: 'studio', source: mode } }),
+  } : undefined
   const newLabel = mode === 'auto-quant' ? t('autoQuant.newResearch')
     : mode === 'prediction' ? t('autoPrediction.newResearch') : t('chat.newChat')
   const openLanding = () => navigate({
@@ -412,7 +416,7 @@ export function ChatWorkspaceSection({
             : mode === 'auto-quant' ? <ChartNoAxesCombined size={17} strokeWidth={1.75} aria-hidden /> : <Radar size={17} strokeWidth={1.75} aria-hidden />}
           active={(isWsFocus && (compact || !selection?.sessionId)) || landingOwnsStatus || (compact && studioActive) || (focused?.kind === 'workspace-details' && focused.params.source === source)}
           showNewAction={mode === 'chat' || Boolean(navigationLoaded && !navigationError && currentWorkspace)}
-          newLabel={newLabel} onOpen={openLanding} menu={contextMenu}
+          newLabel={newLabel} studio={studioAction} onOpen={openLanding} menu={contextMenu}
         >
           {(navigationError || sessionDirectories.error) ? (
             <RefreshNotice message={t('workspace.dataUnavailableSidebar')} actionLabel={t('common.retry')}
@@ -420,12 +424,8 @@ export function ChatWorkspaceSection({
           ) : !navigationLoaded ? (
             <div className="space-y-2 px-2 py-2" aria-label={t('common.loading')}><Skeleton className="h-3 w-24" /><Skeleton className="h-3 w-32" /></div>
           ) : null}
-          {mode !== 'chat' && navigationLoaded && !navigationError && chatWorkspaces.length > 0 && (
-            <HarnessWorkspaceEntry active={studioActive}
-              state={currentWorkspace ? 'ready' : 'select'}
-              onOpen={() => currentWorkspace
-                ? navigate({ kind: 'harness-surface', params: { wsId: currentWorkspace.id, capability: 'studio', source: mode } })
-                : openLanding()} />
+          {mode !== 'chat' && navigationLoaded && !navigationError && chatWorkspaces.length > 0 && !currentWorkspace && (
+            <HarnessWorkspaceEntry onOpen={openLanding} />
           )}
           {runningGroup}
           {visibleNavigationSessions.map(row => (

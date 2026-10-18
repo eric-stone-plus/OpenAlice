@@ -16,6 +16,7 @@ import {
 } from '@/components/ui/dialog'
 import { usePinnedRuntimeDraft } from '@/hooks/usePinnedRuntimeDraft'
 import { AgentRuntimeIcon } from '@/lib/agentRuntimeIcon'
+import { visibleAgentRuntimes } from '@/lib/agentRuntimeVisibility'
 import { AIProviderIcon } from '@/lib/aiProviderIcon'
 import { AgentLaunchSelectors, credentialAccessLabel } from './AgentLaunchControls'
 import {
@@ -227,7 +228,7 @@ function RuntimePreferenceDialog({
 export function WorkspaceAIPreferencesPanel({ workspace, agents, onSaved, onConfigureProvider }: Props) {
   const { t } = useTranslation()
   const runtimeAgents = useMemo(
-    () => agents.filter((agent) => agent.kind !== 'utility' && agent.id !== 'shell'),
+    () => visibleAgentRuntimes(agents).filter((agent) => agent.kind !== 'utility' && agent.id !== 'shell'),
     [agents],
   )
   const persistedRuntime = workspace.runtimeSettings?.runtime ?? {
@@ -285,18 +286,41 @@ export function WorkspaceAIPreferencesPanel({ workspace, agents, onSaved, onConf
     return () => { live = false }
   }, [runtimeAgents])
 
+  const normalizeMode = useCallback((
+    mode: WorkspaceRuntimeMode,
+    value: WorkspaceRuntimeDrafts[WorkspaceRuntimeMode],
+  ): WorkspaceRuntimeDrafts[WorkspaceRuntimeMode] => {
+    const fallback = mode === 'headless'
+      ? runtimeAgents.find((agent) => agent.capabilities.headless)?.id ?? null
+      : runtimeAgents[0]?.id ?? null
+    if (value.defaultAgent === null) {
+      // "Follow recent" must not resolve to a runtime this build hides. The
+      // resolver falls back to the persisted recent agent, so pin the visible
+      // fallback when that recent agent is no longer offered.
+      const recentAgent = persistedRuntime[mode].recent.agent
+      if (!recentAgent || runtimeAgents.some((agent) => agent.id === recentAgent)) return value
+      return { ...value, defaultAgent: fallback }
+    }
+    if (runtimeAgents.some((agent) => agent.id === value.defaultAgent)) return value
+    return { ...value, defaultAgent: fallback }
+  }, [persistedRuntime, runtimeAgents])
+
   const persist = useCallback(async (
     mode: WorkspaceRuntimeMode,
     next: WorkspaceRuntimeDrafts,
     previous: WorkspaceRuntimeDrafts,
   ): Promise<string | null> => {
     if (savedTimerRef.current !== null) window.clearTimeout(savedTimerRef.current)
-    setDrafts(next)
+    const normalized: WorkspaceRuntimeDrafts = {
+      interactive: normalizeMode('interactive', next.interactive),
+      headless: normalizeMode('headless', next.headless),
+    }
+    setDrafts(normalized)
     setSaveState({ mode, status: 'saving' })
     try {
       await updateWorkspaceRuntimeDefaults(workspace.id, {
-        interactive: next.interactive,
-        headless: next.headless,
+        interactive: normalized.interactive,
+        headless: normalized.headless,
       })
       await onSaved()
       setSaveState({ mode, status: 'saved' })
@@ -305,10 +329,10 @@ export function WorkspaceAIPreferencesPanel({ workspace, agents, onSaved, onConf
     } catch (cause) {
       const message = (cause as Error).message
       setDrafts(previous)
-      setSaveState({ mode, status: 'error', message, next, previous })
+      setSaveState({ mode, status: 'error', message, next: normalized, previous })
       return message
     }
-  }, [onSaved, workspace.id])
+  }, [normalizeMode, onSaved, workspace.id])
 
   const saving = saveState?.status === 'saving'
 
@@ -330,7 +354,7 @@ export function WorkspaceAIPreferencesPanel({ workspace, agents, onSaved, onConf
               : runtimeAgents
             const recentAgentId = persistedRuntime[mode].recent.agent
             const recentAgent = runtimeAgents.find((agent) => agent.id === recentAgentId)
-            const recentAgentName = recentAgent?.displayName ?? recentAgentId
+            const recentAgentName = recentAgent?.displayName ?? null
             const recentSummary = recentAgentId
               ? preferenceSummary(
                 persistedRuntime[mode].recent.agents[recentAgentId],
@@ -338,7 +362,12 @@ export function WorkspaceAIPreferencesPanel({ workspace, agents, onSaved, onConf
                 t('workspaceSettings.preferences.agentLogin'),
               )
               : null
-            const selectedAgentId = drafts[mode].defaultAgent ?? recentAgentId
+            const draftDefaultAgent = drafts[mode].defaultAgent
+            const selectedAgentId = draftDefaultAgent === null
+              ? null
+              : compatibleAgents.some((agent) => agent.id === draftDefaultAgent)
+                ? draftDefaultAgent
+                : compatibleAgents[0]?.id ?? null
             return (
               <section key={mode} className="overflow-hidden rounded-lg border border-border bg-card">
                 <div className="border-b border-border bg-muted/25 px-4 py-3">
@@ -356,7 +385,7 @@ export function WorkspaceAIPreferencesPanel({ workspace, agents, onSaved, onConf
                       )}
                       <select
                         aria-label={t('workspaceSettings.preferences.defaultRuntimeFor', { mode: title })}
-                        value={drafts[mode].defaultAgent ?? ''}
+                        value={selectedAgentId ?? ''}
                         disabled={saving}
                         onChange={(event) => {
                           const next = {

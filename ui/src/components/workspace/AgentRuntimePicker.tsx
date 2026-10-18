@@ -192,6 +192,9 @@ export const AgentRuntimePicker = forwardRef<AgentRuntimePickerHandle, AgentRunt
       () => agents.filter((agent) => agent.installed === false && matchesQuery(agent, normalizedQuery)),
       [agents, normalizedQuery],
     )
+    const hasOtherRuntimes = agents.some(
+      (agent) => !primary.some((entry) => entry.id === agent.id),
+    )
 
     useImperativeHandle(ref, () => ({
       open() {
@@ -283,13 +286,17 @@ export const AgentRuntimePicker = forwardRef<AgentRuntimePickerHandle, AgentRunt
                 </DropdownMenuGroup>
               </>
             )}
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              onClick={() => setOthersOpen(true)}
-              className="min-h-9 px-2.5 text-[12px]"
-            >
-              {t('chatLanding.otherRuntimes')}
-            </DropdownMenuItem>
+            {hasOtherRuntimes && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  onClick={() => setOthersOpen(true)}
+                  className="min-h-9 px-2.5 text-[12px]"
+                >
+                  {t('chatLanding.otherRuntimes')}
+                </DropdownMenuItem>
+              </>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
 

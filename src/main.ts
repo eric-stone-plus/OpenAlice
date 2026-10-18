@@ -447,7 +447,10 @@ async function main() {
   // ==================== Shutdown ====================
 
   let stopped = false
+  let shuttingDown = false
   const shutdown = async () => {
+    if (shuttingDown) return
+    shuttingDown = true
     stopped = true
     await removeCliEndpoint()
     newsCollector?.stop()
@@ -469,6 +472,30 @@ async function main() {
   }
 }
 
+/**
+ * The desktop guardian is the only thing that owns this runtime. If it dies
+ * without a clean quit (crash, SIGKILL), this process must not linger as an
+ * orphan holding the data lock, ports, and the CLI endpoint.
+ */
+function startGuardianWatchdog(guardianPid: number | undefined): ReturnType<typeof setInterval> | undefined {
+  if (!guardianPid) return undefined
+  const timer = setInterval(() => {
+    try {
+      process.kill(guardianPid, 0)
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ESRCH') return
+      console.error('guardian process is gone; shutting down')
+      try {
+        process.kill(process.pid, 'SIGTERM')
+      } catch {
+        process.exit(1)
+      }
+    }
+  }, 5_000)
+  timer.unref()
+  return timer
+}
+
 export async function startAliceRuntime(): Promise<void> {
   const guardianPid = positiveInteger(process.env['OPENALICE_GUARDIAN_PID'])
   const guardianStartedAt = positiveInteger(process.env['OPENALICE_GUARDIAN_STARTED_AT'])
@@ -484,6 +511,7 @@ export async function startAliceRuntime(): Promise<void> {
       try { process.kill(process.pid, 'SIGTERM') } catch { process.exit(1) }
     },
   })
+  const guardianWatchdog = startGuardianWatchdog(guardianPid)
   try {
     await main()
   } catch (err) {
@@ -491,6 +519,8 @@ export async function startAliceRuntime(): Promise<void> {
       console.error('runtime lock release failed after startup error:', releaseErr)
     })
     throw err
+  } finally {
+    if (guardianWatchdog) clearInterval(guardianWatchdog)
   }
 }
 

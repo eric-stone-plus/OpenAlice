@@ -33,6 +33,7 @@ vi.mock('@/api/config', async (importOriginal) => {
 const agents: AgentInfo[] = [
   { id: 'pi', displayName: 'Pi', capabilities: { parallelPerCwd: true, resumeLast: true, resumeById: true, transcriptDiscovery: 'none', headless: true } },
   { id: 'codex', displayName: 'Codex', capabilities: { parallelPerCwd: true, resumeLast: true, resumeById: true, transcriptDiscovery: 'subprocess', headless: true } },
+  { id: 'opencode', displayName: 'opencode', capabilities: { parallelPerCwd: true, resumeLast: true, resumeById: true, transcriptDiscovery: 'none', headless: true } },
 ]
 
 const workspace: Workspace = {
@@ -57,6 +58,7 @@ const workspace: Workspace = {
         },
       },
       headless: {
+        defaultAgent: 'codex',
         agents: {},
         recent: { agent: 'codex', agents: { codex: { accessMode: 'native', model: 'gpt-5.6-terra' } } },
       },
@@ -75,6 +77,7 @@ beforeEach(async () => {
     agents: {
       pi: { agent: 'pi', ready: true, source: 'global-login' },
       codex: { agent: 'codex', ready: true, source: 'global-login' },
+      opencode: { agent: 'opencode', ready: true, source: 'global-login' },
     },
   })
   mocks.getPresets.mockResolvedValue({ presets: [] })
@@ -83,7 +86,7 @@ beforeEach(async () => {
 afterEach(cleanup)
 
 describe('WorkspaceAIPreferencesPanel', () => {
-  it('shows both launch modes together and saves a runtime choice immediately', async () => {
+  it('shows opencode for both launch modes and normalizes hidden defaults on save', async () => {
     const onSaved = vi.fn(async () => undefined)
     render(
       <WorkspaceAIPreferencesPanel
@@ -97,38 +100,35 @@ describe('WorkspaceAIPreferencesPanel', () => {
     expect(screen.queryByRole('tab')).toBeNull()
     expect(screen.getByText('交互式 Session')).toBeTruthy()
     expect(screen.getByText('无头运行')).toBeTruthy()
-    expect((screen.getByRole('combobox', { name: '交互式 Session的默认 Agent Runtime' }) as HTMLSelectElement).value).toBe('pi')
-    expect((await screen.findAllByText('DeepSeek API')).length).toBeGreaterThan(0)
-    expect(screen.getAllByText('deepseek-v4-flash, high').length).toBeGreaterThan(0)
-    expect(screen.getByRole('option', { name: '跟随最近使用 — Pi' })).toBeTruthy()
-    expect(screen.getByText('最近成功使用的 Runtime')).toBeTruthy()
-    expect(screen.getByText('当前解析为')).toBeTruthy()
-    expect(screen.getByText('固定默认值 · 当前最近使用')).toBeTruthy()
-    expect(screen.getByText('当前最近使用的 Runtime')).toBeTruthy()
-    expect(screen.getAllByText('使用最近设置').length).toBeGreaterThan(0)
+    expect((screen.getByRole('combobox', { name: '交互式 Session的默认 Agent Runtime' }) as HTMLSelectElement).value).toBe('opencode')
+    expect((screen.getByRole('combobox', { name: '无头运行的默认 Agent Runtime' }) as HTMLSelectElement).value).toBe('opencode')
+    expect(screen.queryByRole('option', { name: /Pi/ })).toBeNull()
+    expect(screen.queryByRole('option', { name: /Codex/ })).toBeNull()
+    expect(screen.getAllByRole('option', { name: '跟随最近一次成功使用的 Runtime' }).length).toBe(2)
+    expect(screen.queryByText('跟随最近使用 — Pi')).toBeNull()
 
     const runtime = screen.getByRole('combobox', { name: '无头运行的默认 Agent Runtime' })
-    expect((runtime as HTMLSelectElement).value).toBe('')
-    fireEvent.change(runtime, { target: { value: 'codex' } })
+    fireEvent.change(runtime, { target: { value: '' } })
 
     await waitFor(() => expect(mocks.updateWorkspaceRuntimeDefaults).toHaveBeenCalledWith(
       'chat-1',
       {
         interactive: {
-          defaultAgent: 'pi',
+          defaultAgent: 'opencode',
           agents: {
             pi: { accessMode: 'vault', credentialSlug: 'deepseek-1', model: 'deepseek-v4-flash', reasoningEffort: 'high' },
           },
         },
-        headless: { defaultAgent: 'codex', agents: {} },
+        headless: { defaultAgent: 'opencode', agents: {} },
       },
     ))
+    expect((screen.getByRole('combobox', { name: '无头运行的默认 Agent Runtime' }) as HTMLSelectElement).value).toBe('opencode')
     expect(onSaved).toHaveBeenCalledOnce()
     expect(screen.queryByRole('button', { name: '保存' })).toBeNull()
     expect((await screen.findByRole('status')).textContent).toContain('已保存')
   })
 
-  it('saves a runtime preference directly from the full settings form', async () => {
+  it('saves an opencode preference directly from the full settings form', async () => {
     render(
       <WorkspaceAIPreferencesPanel
         workspace={workspace}
@@ -138,20 +138,19 @@ describe('WorkspaceAIPreferencesPanel', () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: '编辑交互式 Session中的 Codex 偏好' }))
+    fireEvent.click(screen.getByRole('button', { name: '编辑交互式 Session中的 opencode 偏好' }))
     fireEvent.click(screen.getByRole('radio', { name: /固定默认值/ }))
     const access = await screen.findByRole('button', { name: 'AI Provider' })
     expect(screen.getByRole('button', { name: '模型与推理强度' })).toBeTruthy()
 
     fireEvent.click(access)
-    expect(await screen.findByText('选择 Codex 使用的 AI 账户')).toBeTruthy()
-    expect(screen.getByRole('menuitem', { name: /Codex 账户/ })).toBeTruthy()
+    expect(await screen.findByText('选择 opencode 使用的 AI 账户')).toBeTruthy()
     fireEvent.click(screen.getByRole('menuitem', { name: /DeepSeek API/ }))
     await waitFor(() => expect(screen.queryByRole('menuitem', { name: /DeepSeek API/ })).toBeNull())
 
     fireEvent.click(screen.getByRole('button', { name: '保存更改' }))
     await waitFor(() => expect(mocks.updateWorkspaceRuntimeDefaults).toHaveBeenCalledOnce())
-    await waitFor(() => expect(screen.queryByRole('heading', { name: 'Codex 默认偏好' })).toBeNull())
+    await waitFor(() => expect(screen.queryByRole('heading', { name: 'opencode 默认偏好' })).toBeNull())
   })
 
   it('rolls back a failed automatic save and allows retrying it', async () => {
@@ -166,13 +165,13 @@ describe('WorkspaceAIPreferencesPanel', () => {
     )
 
     const runtime = screen.getByRole('combobox', { name: '无头运行的默认 Agent Runtime' }) as HTMLSelectElement
-    fireEvent.change(runtime, { target: { value: 'codex' } })
+    fireEvent.change(runtime, { target: { value: '' } })
 
     expect((await screen.findByRole('alert')).textContent).toContain('保存失败')
-    expect(runtime.value).toBe('')
+    expect(runtime.value).toBe('opencode')
 
     fireEvent.click(screen.getByRole('button', { name: '重试' }))
     await waitFor(() => expect(mocks.updateWorkspaceRuntimeDefaults).toHaveBeenCalledTimes(2))
-    await waitFor(() => expect(runtime.value).toBe('codex'))
+    await waitFor(() => expect(runtime.value).toBe('opencode'))
   })
 })

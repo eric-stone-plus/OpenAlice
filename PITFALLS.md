@@ -55,6 +55,10 @@ Notes:
 
 ## 2. Electron 39 defaults to native Wayland, which breaks companion dragging
 
+> The desktop companion window was removed; Alice is now the welcome-screen
+> logo. The X11 relaunch remains because that window path is the one validated
+> on this host. The drag constraints below are historical.
+
 On a Wayland session Electron 39 starts with the Wayland ozone backend. The
 desktop companion moves itself with:
 
@@ -300,6 +304,9 @@ An unpacked run still gets the pet window icon, but GNOME's app grid needs a
 
 ## 13. Companion placement: the transparent-gutter "air wall"
 
+> Removed with the desktop companion window; Alice is now the welcome-screen
+> logo. This section records the native-placement constraints for reference.
+
 The companion window is `size * 2.7` wide and `size * 1.65` tall; the visible
 character is only the middle third, bottom-aligned. The side thirds and the top
 are reserved for speech bubbles. The original `settleCompanion` clamped the
@@ -342,9 +349,9 @@ Two multi-monitor details matter:
   legacy pre-placement origin, not a user drag; treat it as "no saved
   position" and restore the default bottom-right corner.
 
-The unit tests in `apps/desktop/src/companion-geometry.spec.ts` cover the
-portrait-screen edges: the visible left/top/right/bottom reach the work-area
-edges while the window bounds may be negative or past the screen.
+The companion window and its geometry spec were removed with the welcome-screen
+pet; `ui/src/components/PetLogo.spec.tsx` covers the embedded mark's size,
+transparency, keyboard interaction and live region.
 
 ## 14. Linux window close quits the runtime
 
@@ -361,10 +368,19 @@ A relaunch that lands inside that grace window used to see the still-alive
 owner and show the conflict dialog. `shutdown()` now writes
 `<home>/state/desktop-shutdown.json` before stopping children, and
 `resolveExistingOwnerStartup` waits up to 12s for that exact pid's guardian
-lock to disappear before deciding. The marker is trusted only while it names
-the active owner, and it is cleared after the locks are released, so a stale
-marker cannot delay a normal launch. SIGTERM/SIGINT run the same shutdown;
-repeated signals are absorbed while cleanup is in progress.
+lock to disappear before deciding. The marker is written to a sibling and
+renamed into place, so a relaunch can never read a truncated document; it is
+trusted only while it names the active owner, and it is cleared after the
+locks are released, so a stale marker cannot delay a normal launch.
+SIGTERM/SIGINT run the same shutdown; repeated signals are absorbed while
+cleanup is in progress.
+
+If Alice overruns the 5s grace window and is SIGKILLed, the guardian clears
+any runtime lock or CLI endpoint whose owner is the stopped Alice process (or
+already dead) after the children are gone. If the guardian itself dies without
+running this path, Alice's guardian watchdog exits the runtime within 5s, and
+the lock inspection treats a dead guardian as stale instead of reporting a
+phantom desktop owner on the next launch.
 
 ## 15. Recommended build sequence
 

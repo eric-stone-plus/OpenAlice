@@ -68,6 +68,7 @@ const capabilities = {
 
 const agents: readonly AgentInfo[] = [
   { id: 'pi', displayName: 'Pi', kind: 'agent', capabilities },
+  { id: 'opencode', displayName: 'opencode', kind: 'agent', capabilities },
   { id: 'shell', displayName: 'Shell', kind: 'utility', capabilities },
 ]
 
@@ -89,13 +90,13 @@ afterEach(() => {
 })
 
 describe('WorkspaceRow session launcher', () => {
-  it('keeps the default runtime one click away while the full runtime menu remains discoverable', () => {
+  it('keeps the opencode default one click away while the shell utility remains discoverable', () => {
     const onSpawn = vi.fn()
     render(
       <WorkspaceRow
         workspace={workspace}
         agents={agents}
-        defaultAgent="pi"
+        defaultAgent="opencode"
         selection={null}
         onSelectWorkspace={vi.fn()}
         onSelectSession={vi.fn()}
@@ -108,11 +109,12 @@ describe('WorkspaceRow session launcher', () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: 'Spawn a new Pi session' }))
-    expect(onSpawn).toHaveBeenCalledWith(workspace.id, { agent: 'pi' })
+    fireEvent.click(screen.getByRole('button', { name: 'Spawn a new opencode session' }))
+    expect(onSpawn).toHaveBeenCalledWith(workspace.id, { agent: 'opencode' })
 
     fireEvent.click(screen.getByRole('button', { name: 'Choose runtime for new session' }))
     expect(screen.getByRole('menuitem', { name: 'Shell (sh)' })).toBeTruthy()
+    expect(screen.queryByRole('menuitem', { name: /^Pi/ })).toBeNull()
     fireEvent.click(screen.getByRole('menuitem', { name: 'Shell (sh)' }))
 
     expect(onSpawn).toHaveBeenLastCalledWith(workspace.id, { agent: 'shell' })

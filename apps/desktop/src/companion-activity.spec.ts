@@ -7,7 +7,7 @@ const handlers = vi.hoisted(()=>new Map<string, (event:unknown,input?:unknown)=>
 const state = vi.hoisted(()=>({home:''}))
 vi.mock('electron',()=>({app:{getPath:()=>state.home},ipcMain:{handle:(name:string,fn:(event:unknown,input?:unknown)=>unknown)=>handlers.set(name,fn),removeHandler:(name:string)=>handlers.delete(name)}}))
 import { installCompanionActivity } from './companion-activity.js'
-function windowStub(){const frame={};const contents=Object.assign(new EventEmitter(),{mainFrame:frame,send:vi.fn()});return Object.assign(new EventEmitter(),{webContents:contents,isDestroyed:()=>false,isVisible:()=>true,isMinimized:()=>false,restore:vi.fn(),show:vi.fn(),focus:vi.fn()})}
+function windowStub(){const frame={};const contents=Object.assign(new EventEmitter(),{mainFrame:frame,send:vi.fn(),isDestroyed:(): boolean=>false});return Object.assign(new EventEmitter(),{webContents:contents,isDestroyed:(): boolean=>false,isVisible:()=>true,isMinimized:()=>false,restore:vi.fn(),show:vi.fn(),focus:vi.fn()})}
 afterEach(()=>{vi.useRealTimers();handlers.clear();if(state.home)rmSync(state.home,{recursive:true,force:true})})
 describe('companion notification IPC',()=>{
   it('accepts only owning main frame settings and rejects subframes/other windows; no URL/code actions',async()=>{

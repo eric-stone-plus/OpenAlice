@@ -36,6 +36,7 @@ import { PageTopBar } from '../components/PageTopBar'
 import { WorkspaceFilesToggle } from '../components/workspace/WorkspaceFilesToggle'
 import { Button } from '../components/ui/button'
 import { AgentRuntimeIcon } from '../lib/agentRuntimeIcon'
+import { visibleAgentRuntimes } from '../lib/agentRuntimeVisibility'
 import type { ViewSpec } from '../tabs/types'
 
 interface Props {
@@ -72,11 +73,14 @@ export function WorkspacePage({ spec, visible }: Props) {
     if (handedOver || !visible || activeRecord?.state !== 'running' || activeRecord.surface !== 'headless') return
     inspectOccupiedSession({ record: activeRecord, workspaceId: wsId, source })
   }, [visible, activeRecord, wsId, sessionId, source, handedOver])
-  const effectiveDefaultAgent = workspace?.defaultAgent ?? ctx.defaultAgent
-  const defaultAgentEnabled =
-    effectiveDefaultAgent !== null &&
-    effectiveDefaultAgent !== undefined &&
-    ctx.agents.some((a) => a.id === effectiveDefaultAgent && a.kind !== 'utility')
+  const visibleRuntimeAgents = visibleAgentRuntimes(ctx.agents).filter((agent) => agent.kind !== 'utility')
+  const configuredDefaultAgent = workspace?.defaultAgent ?? ctx.defaultAgent
+  const effectiveDefaultAgent = configuredDefaultAgent !== null
+    && configuredDefaultAgent !== undefined
+    && visibleRuntimeAgents.some((agent) => agent.id === configuredDefaultAgent)
+    ? configuredDefaultAgent
+    : visibleRuntimeAgents[0]?.id ?? null
+  const defaultAgentEnabled = effectiveDefaultAgent !== null
 
   const spawnDefault = (): void => {
     if (defaultAgentEnabled && effectiveDefaultAgent) {

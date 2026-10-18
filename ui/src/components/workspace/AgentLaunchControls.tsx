@@ -48,6 +48,7 @@ import {
 import { formatContextWindow, type AgentLaunchConfigState } from '../../hooks/useAgentLaunchConfig'
 import { useAgentRuntimes } from '../../hooks/useAgentRuntimes'
 import { projectAgentRuntimeQuickAccess } from '../../lib/agentRuntimeQuickAccess'
+import { visibleAgentRuntimes } from '../../lib/agentRuntimeVisibility'
 import { AgentRuntimeIcon } from '../../lib/agentRuntimeIcon'
 import { AIProviderIcon } from '@/lib/aiProviderIcon'
 import { ModelCatalogStatus } from '../ModelCatalogStatus'
@@ -535,17 +536,18 @@ export const AgentLaunchSelectors = forwardRef<AgentLaunchSelectorsHandle, Agent
   const agentPickerRef = useRef<AgentRuntimePickerHandle>(null)
   const settingsLayout = layout === 'settings'
   const runtimeName = config.selectedAgent?.displayName ?? t('chatLanding.runtimeFallback')
-  const pickerAgents = discovery.catalog.length > 0
-    ? discovery.catalog
-    : config.agents.filter((agent) => agent.kind !== 'utility')
-  const pickerPrimary = useMemo(() => {
-    if (discovery.catalog.length > 0) return discovery.primary
-    return projectAgentRuntimeQuickAccess(
+  const pickerAgents = useMemo(() => {
+    const source = discovery.catalog.length > 0 ? discovery.catalog : config.agents
+    return visibleAgentRuntimes(source.filter((agent) => agent.kind !== 'utility'))
+  }, [config.agents, discovery.catalog])
+  const pickerPrimary = useMemo(
+    () => projectAgentRuntimeQuickAccess(
       pickerAgents,
       discovery.quickAccessIds,
       discovery.recentAgentIds,
-    ).primary
-  }, [discovery.catalog.length, discovery.primary, discovery.quickAccessIds, discovery.recentAgentIds, pickerAgents])
+    ).primary,
+    [discovery.quickAccessIds, discovery.recentAgentIds, pickerAgents],
+  )
   const workspaceAccess = config.accessMode === 'auto' && config.detectedCredential?.configured === true
   const nativeAccess = config.accessMode === 'native' || (
     config.accessMode === 'auto' && !workspaceAccess && config.effectiveCredential === null

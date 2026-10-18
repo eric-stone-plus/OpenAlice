@@ -10,8 +10,21 @@ import { AgentRuntimesSettingsPage } from './AgentRuntimesSettingsPage'
 const mocks = vi.hoisted(() => ({
   saveQuickAccess: vi.fn(),
   refresh: vi.fn(),
-  quickAccessIds: ['pi'] as string[],
+  quickAccessIds: ['pi', 'opencode'] as string[],
   catalog: [
+    {
+      id: 'opencode',
+      displayName: 'OpenCode',
+      kind: 'agent',
+      installed: true,
+      binPath: '/usr/local/bin/opencode',
+      capabilities: {
+        parallelPerCwd: true,
+        resumeLast: true,
+        resumeById: true,
+        transcriptDiscovery: 'none',
+      },
+    },
     {
       id: 'pi',
       displayName: 'Pi',
@@ -63,29 +76,16 @@ vi.mock('../hooks/useAgentRuntimes', () => ({
       overallReady: true,
       checkedAt: '2026-08-18T00:00:00.000Z',
       agents: {
-        pi: {
-          agent: 'pi',
-          displayName: 'Pi',
+        opencode: {
+          agent: 'opencode',
+          displayName: 'OpenCode',
           installed: true,
-          binPath: '/usr/bin/pi',
+          binPath: '/usr/local/bin/opencode',
           status: 'ready',
           ready: true,
           source: 'global-login',
           checkedAt: '2026-08-18T00:00:00.000Z',
           durationMs: 9,
-        },
-        codex: {
-          agent: 'codex',
-          displayName: 'Codex',
-          installed: false,
-          binPath: null,
-          status: 'not_installed',
-          ready: false,
-          source: 'unknown',
-          checkedAt: '2026-08-18T00:00:00.000Z',
-          durationMs: 1,
-          repairTarget: 'runtime-install',
-          message: 'Codex is not installed or not on PATH.',
         },
       },
     },
@@ -102,7 +102,7 @@ vi.mock('../hooks/useAgentRuntimes', () => ({
 
 beforeEach(async () => {
   await i18n.changeLanguage('en')
-  mocks.quickAccessIds = ['pi']
+  mocks.quickAccessIds = ['pi', 'opencode']
   mocks.saveQuickAccess.mockReset()
   mocks.refresh.mockReset()
   mocks.saveQuickAccess.mockResolvedValue(undefined)
@@ -112,48 +112,39 @@ beforeEach(async () => {
 afterEach(cleanup)
 
 describe('AgentRuntimesSettingsPage', () => {
-  it('shows installed path, readiness, and ordered quick-access controls', async () => {
+  it('shows only the visible runtime with its path and readiness', async () => {
     render(<AgentRuntimesSettingsPage />)
 
     expect(screen.getByRole('heading', { name: 'Agent runtimes' })).toBeTruthy()
-    expect(screen.getByText('/usr/bin/pi')).toBeTruthy()
+    expect(screen.getByText('/usr/local/bin/opencode')).toBeTruthy()
     expect(screen.getAllByText(/Installed/).length).toBeGreaterThan(0)
-    expect(screen.getByText('Install this CLI and make sure it is on PATH, then check again.')).toBeTruthy()
+    expect(screen.queryByText('/usr/bin/pi')).toBeNull()
 
     fireEvent.click(screen.getByRole('button', { name: 'Refresh' }))
     await waitFor(() => expect(mocks.refresh).toHaveBeenCalledWith())
-
-    fireEvent.click(screen.getByRole('switch', { name: 'Add Claude Code to quick access' }))
-    await waitFor(() => expect(mocks.saveQuickAccess).toHaveBeenCalledWith(['pi', 'claude']))
   })
 
-  it('does not let an uninstalled runtime newly consume a pin slot', () => {
+  it('never offers hidden runtimes even when they are installed', () => {
     render(<AgentRuntimesSettingsPage />)
 
-    const addCodex = screen.getByRole('switch', {
-      name: 'Codex is not installed, so it cannot be added to quick access.',
-    })
-    expect(addCodex.getAttribute('aria-checked')).toBe('false')
-    expect(addCodex).toHaveProperty('disabled', true)
-    fireEvent.click(addCodex)
-    expect(mocks.saveQuickAccess).not.toHaveBeenCalled()
+    expect(screen.queryByRole('switch', { name: /Claude/ })).toBeNull()
+    expect(screen.queryByRole('switch', { name: /^Pi/ })).toBeNull()
+    expect(screen.queryByRole('switch', { name: /Codex/ })).toBeNull()
+    expect(screen.getAllByRole('switch', { name: 'Remove OpenCode from quick access' }).length).toBeGreaterThan(0)
   })
 
-  it('keeps a stale uninstalled pin visible so it can be removed', async () => {
-    mocks.quickAccessIds = ['codex', 'pi']
+  it('drops stale hidden pins when the visible pin is removed', async () => {
     render(<AgentRuntimesSettingsPage />)
 
-    const removeCodex = screen.getAllByRole('switch', { name: 'Remove Codex from quick access' })
-    expect(removeCodex.length).toBeGreaterThan(0)
-    fireEvent.click(removeCodex[0]!)
-    await waitFor(() => expect(mocks.saveQuickAccess).toHaveBeenCalledWith(['pi']))
+    fireEvent.click(screen.getAllByRole('switch', { name: 'Remove OpenCode from quick access' })[0]!)
+    await waitFor(() => expect(mocks.saveQuickAccess).toHaveBeenCalledWith([]))
   })
 
-  it('moves a pinned runtime without exceeding four slots', async () => {
-    mocks.quickAccessIds = ['pi', 'claude']
+  it('adds the visible runtime to quick access when it is unpinned', async () => {
+    mocks.quickAccessIds = []
     render(<AgentRuntimesSettingsPage />)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Move Pi down' }))
-    await waitFor(() => expect(mocks.saveQuickAccess).toHaveBeenCalledWith(['claude', 'pi']))
+    fireEvent.click(screen.getByRole('switch', { name: 'Add OpenCode to quick access' }))
+    await waitFor(() => expect(mocks.saveQuickAccess).toHaveBeenCalledWith(['opencode']))
   })
 })

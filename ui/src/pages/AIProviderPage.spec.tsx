@@ -79,6 +79,21 @@ beforeEach(async () => {
         },
       },
     },
+    {
+      id: 'opencode',
+      displayName: 'opencode',
+      capabilities: {
+        parallelPerCwd: true,
+        resumeLast: true,
+        resumeById: true,
+        transcriptDiscovery: 'none',
+        aiProvider: {
+          credentialSource: 'workspace-required',
+          wirePreference: ['google-generative-ai', 'openai-chat', 'anthropic', 'openai-responses'],
+          modelRegistration: { contextWindow: true, reasoning: true },
+        },
+      },
+    },
   ])
 })
 
@@ -98,16 +113,31 @@ describe('AIProviderPage', () => {
     expect(defaults.compareDocumentPosition(runtimesLink) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
-  it('persists a Pi creation default and acknowledges the save', async () => {
+  it('persists an opencode creation default and acknowledges the save', async () => {
     render(<AIProviderPage />)
 
-    const select = await screen.findByRole('combobox', { name: 'Pi 默认凭证' })
+    const select = await screen.findByRole('combobox', { name: 'opencode 默认凭证' })
     fireEvent.change(select, { target: { value: 'google-1' } })
 
     await waitFor(() => expect(mocks.setWorkspaceCredentialDefaults).toHaveBeenCalledWith(
-      { pi: { credentialSlug: 'google-1', wireShape: 'google-generative-ai' } },
+      { opencode: { credentialSlug: 'google-1', wireShape: 'google-generative-ai' } },
     ))
     expect(await screen.findByText('已保存')).toBeTruthy()
+  })
+
+  it('drops hidden creation defaults when saving an opencode default', async () => {
+    mocks.getWorkspaceCredentialDefaults.mockResolvedValueOnce({
+      defaults: { pi: { credentialSlug: 'google-1', wireShape: 'google-generative-ai' } },
+      compatibleByAgent: { pi: ['google-1'], opencode: ['google-1'] },
+    })
+    render(<AIProviderPage />)
+
+    const select = await screen.findByRole('combobox', { name: 'opencode 默认凭证' })
+    fireEvent.change(select, { target: { value: 'google-1' } })
+
+    await waitFor(() => expect(mocks.setWorkspaceCredentialDefaults).toHaveBeenCalledWith(
+      { opencode: { credentialSlug: 'google-1', wireShape: 'google-generative-ai' } },
+    ))
   })
 
   it('names each credential edit action with the credential it changes', async () => {

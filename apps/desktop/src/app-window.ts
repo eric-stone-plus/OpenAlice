@@ -2,7 +2,6 @@ import { app, BrowserWindow } from 'electron'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { configureWindowChrome, windowChromeOptions } from './window-chrome.js'
-import { createCompanion, type CompanionHandle } from './companion.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 
@@ -15,7 +14,6 @@ function resolveWindowIcon(): string {
 
 export interface AppWindow {
   readonly window: BrowserWindow
-  readonly companion?: CompanionHandle
 }
 
 /** Keep dev/demo and installed desktop renderer isolation and chrome identical. */
@@ -32,7 +30,5 @@ export function createAppWindow(preload: string, title = 'OpenAlice'): AppWindow
   // default limit of 10 is below the current combined count.
   win.setMaxListeners(20)
   configureWindowChrome(win)
-  let companion: CompanionHandle | undefined
-  try { companion = createCompanion(win) } catch (error) { console.error('[companion] startup failed:', error) }
-  return { window: win, companion }
+  return { window: win }
 }

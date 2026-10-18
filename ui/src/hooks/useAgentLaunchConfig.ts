@@ -22,6 +22,7 @@ import {
 import { useAgentRuntimes } from './useAgentRuntimes'
 import { useProviderModels } from './useProviderModels'
 import { requiresWorkspaceCredential, resolveAgentRuntime } from '../lib/agentRuntime'
+import { visibleAgentRuntimes } from '../lib/agentRuntimeVisibility'
 import {
   runtimeModelOptions,
 } from '../components/issue-runtime-options'
@@ -388,6 +389,9 @@ export interface UseAgentLaunchConfigOptions {
   /** Managed product Workspace: native project config is deprecated and must
    * not participate in the normal launch picker. */
   readonly managedWorkspaceLaunch?: boolean
+  /** Configure an explicitly pinned runtime (an existing Session or Issue)
+   * even when this build hides it from runtime menus. */
+  readonly allowHiddenAgent?: boolean
   /** Shared discovery snapshot. Omit to consume `useAgentRuntimes`. */
   readonly runtimeReadiness?: AgentRuntimeReadinessSnapshot | null
 }
@@ -444,6 +448,7 @@ export function useAgentLaunchConfig({
   workspaceId,
   hasWorkspace,
   managedWorkspaceLaunch = false,
+  allowHiddenAgent = false,
   runtimeReadiness: runtimeReadinessInput,
 }: UseAgentLaunchConfigOptions): AgentLaunchConfigState {
   const discovered = useAgentRuntimes()
@@ -477,8 +482,12 @@ export function useAgentLaunchConfig({
   }
 
   const preferredAgent = selectedAgentId ?? preferences.recentLaunch?.agent ?? null
-  const effectiveAgent = resolveAgentRuntime(agents, preferredAgent, defaultAgent, runtimeReadiness)
-  const selectedAgent = agents.find((agent) => agent.id === effectiveAgent) ?? null
+  const visibleAgents = useMemo(
+    () => (allowHiddenAgent ? [...agents] : visibleAgentRuntimes(agents)),
+    [agents, allowHiddenAgent],
+  )
+  const effectiveAgent = resolveAgentRuntime(visibleAgents, preferredAgent, defaultAgent, runtimeReadiness)
+  const selectedAgent = visibleAgents.find((agent) => agent.id === effectiveAgent) ?? null
   const selectedRuntimeReadiness = effectiveAgent ? runtimeReadiness?.agents[effectiveAgent] ?? null : null
   const selectedRuntimeUsesGlobalConfig = selectedRuntimeReadiness?.ready === true && (
     selectedRuntimeReadiness.source === 'global-config' ||
@@ -804,7 +813,7 @@ export function useAgentLaunchConfig({
   const resetCredentialSelection = useCallback(() => setPickedCredential(null), [])
 
   return useMemo(() => ({
-    agents,
+    agents: visibleAgents,
     effectiveAgent,
     selectedAgent,
     runtimeReadiness,
@@ -830,8 +839,8 @@ export function useAgentLaunchConfig({
     noCredentials,
     needsProviderSetup: noCredentials,
     selectedMissing: selectedAgent?.installed === false,
-    anyInstalled: agents.some((agent) => agent.installed !== false),
-    agentsKnown: agents.length > 0,
+    anyInstalled: visibleAgents.some((agent) => agent.installed !== false),
+    agentsKnown: visibleAgents.length > 0,
     launchCredentialSlug,
     selectAgent,
     selectCredential,
@@ -841,7 +850,7 @@ export function useAgentLaunchConfig({
     selectReasoningEffort,
     resetCredentialSelection,
   }), [
-    agents,
+    visibleAgents,
     aiDetails,
     accessMode,
     canSelectCredential,

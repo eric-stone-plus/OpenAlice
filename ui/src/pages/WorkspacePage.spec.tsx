@@ -29,7 +29,7 @@ vi.mock('../contexts/workspaces-context', () => ({
   useWorkspaces: () => ({
     workspaces: mocks.workspaces,
     defaultAgent: 'codex',
-    agents: [{ id: 'codex', kind: 'agent' }, { id: 'pi', kind: 'agent', capabilities: { web: { wire: 'pi-rpc' } } }],
+    agents: [{ id: 'codex', kind: 'agent' }, { id: 'pi', kind: 'agent', capabilities: { web: { wire: 'pi-rpc' } } }, { id: 'opencode', kind: 'agent' }],
     spawn: mocks.spawn,
     openAgentConfig: mocks.openAgentConfig,
     resumeSession: mocks.resumeSession,
@@ -85,7 +85,7 @@ beforeEach(() => {
 afterEach(cleanup)
 
 describe('WorkspacePage identity', () => {
-  it('uses the Workspace runtime ahead of the installation fallback for a fresh Session', () => {
+  it('falls back from a hidden Workspace runtime to the opencode default for a fresh Session', () => {
     mocks.workspaces = [workspace({ defaultAgent: 'pi' })]
     render(
       <WorkspacePage
@@ -95,7 +95,7 @@ describe('WorkspacePage identity', () => {
     )
 
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 't', metaKey: true, bubbles: true }))
-    expect(mocks.spawn).toHaveBeenCalledWith('chat-1', { agent: 'pi' }, undefined)
+    expect(mocks.spawn).toHaveBeenCalledWith('chat-1', { agent: 'opencode' }, undefined)
   })
 
   it('keeps the user-defined Workspace name primary in the header and runtime label', () => {

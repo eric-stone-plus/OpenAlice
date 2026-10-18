@@ -120,8 +120,7 @@
       "open-alice#electron:smoke:workspace",
       "open-alice#electron:smoke:guardian-recovery",
       "open-alice#electron:smoke:existing-owner",
-      "open-alice#electron:smoke:upgrade",
-      "desktop-companion"
+      "open-alice#electron:smoke:upgrade"
     ],
     "scope": "Dedicated existing acceptance runners; prerequisites, supported platforms and explicit arguments remain owned by each command. Never automatically executed by suite selection; listing is not acceptance."
   },

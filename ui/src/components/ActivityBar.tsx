@@ -268,6 +268,11 @@ export function ActivityBar({
             )
           })}
           <div className={compactRail ? 'mt-4 flex flex-col gap-1 border-t border-sidebar-border/70 pt-3' : 'mt-5 space-y-1'}>
+            {!compactRail && (
+              <div className="px-2.5 pb-1 text-[11px] font-medium uppercase tracking-[0.08em] text-sidebar-foreground/70">
+                {t('nav.projects')}
+              </div>
+            )}
             {harnesses.map(mode => (
               <ChatWorkspaceSection key={mode} mode={mode} placement="navigation" compact={compactRail} onNavigate={onClose} />
             ))}

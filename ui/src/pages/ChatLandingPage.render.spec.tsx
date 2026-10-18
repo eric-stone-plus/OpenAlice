@@ -90,6 +90,17 @@ const opencodeAgent: AgentInfo = {
   displayName: 'opencode',
 }
 
+const nativeOpenCodeAgent: AgentInfo = {
+  ...opencodeAgent,
+  capabilities: {
+    ...opencodeAgent.capabilities,
+    aiProvider: {
+      ...opencodeAgent.capabilities.aiProvider!,
+      credentialSource: 'runtime-or-workspace',
+    },
+  },
+}
+
 const codexAgent: AgentInfo = {
   ...piAgent,
   id: 'codex',
@@ -117,7 +128,7 @@ function chatWorkspace(): Workspace {
 function withInteractivePreference(
   workspace: Workspace,
   preference: NonNullable<Workspace['runtimeSettings']>['runtime']['interactive']['agents'][string],
-  agent = 'pi',
+  agent = 'opencode',
 ): Workspace {
   return {
     ...workspace,
@@ -141,7 +152,7 @@ function context(
     workspaces,
     templates: [],
     agents: [piAgent, opencodeAgent],
-    defaultAgent: 'pi',
+    defaultAgent: 'opencode',
     issueDefaultAgent: null,
     listError: null,
     workspaceManager: null,
@@ -427,13 +438,13 @@ describe('ChatLandingPage Workspace inventory states', () => {
 })
 
 describe('ChatLandingPage adapter inventory', () => {
-  it('offers installation-level runtimes regardless of Workspace age', async () => {
+  it('offers only the opencode runtime in the picker', async () => {
     render(<ChatLandingPage spec={{ params: { targetWsId: 'chat-1' } }} />)
 
     fireEvent.click(await screen.findByRole('button', { name: 'Select agent' }))
 
-    expect(screen.getByRole('menuitem', { name: /Pi/ })).toBeTruthy()
     expect(screen.getByRole('menuitem', { name: /opencode/ })).toBeTruthy()
+    expect(screen.queryByRole('menuitem', { name: /Pi/ })).toBeNull()
   })
 
   it('keeps Session context and AI inference in distinct groups on one surface', async () => {
@@ -508,7 +519,7 @@ describe('ChatLandingPage keyboard submission', () => {
     vi.stubEnv('VITE_DEMO_MODE', 'true')
     mocks.useWorkspaces.mockImplementation(() => ({
       ...context([chatWorkspace()]),
-      agents: [{ ...piAgent, capabilities: { ...piAgent.capabilities, web: { wire: 'pi-rpc', freshSession: true } } }],
+      agents: [{ ...opencodeAgent, capabilities: { ...opencodeAgent.capabilities, web: { wire: 'pi-rpc', freshSession: true } } }],
     }))
     render(<ChatLandingPage spec={{ params: { targetWsId: 'chat-1' } }} />)
     await screen.findByRole('button', { name: 'UI mode: GUI' })
@@ -539,7 +550,7 @@ describe('ChatLandingPage keyboard submission', () => {
   it('offers GUI for a capable runtime and passes the selected surface', async () => {
     mocks.useWorkspaces.mockImplementation(() => ({
       ...context([chatWorkspace()]),
-      agents: [{ ...piAgent, capabilities: { ...piAgent.capabilities, web: { wire: 'pi-rpc', freshSession: true } } }],
+      agents: [{ ...opencodeAgent, capabilities: { ...opencodeAgent.capabilities, web: { wire: 'pi-rpc', freshSession: true } } }],
     }))
     render(<ChatLandingPage spec={{ params: { targetWsId: 'chat-1' } }} />)
     await screen.findByRole('button', { name: 'AI Provider, Model and reasoning' })
@@ -565,7 +576,7 @@ describe('ChatLandingPage keyboard submission', () => {
     fireEvent.keyDown(composer, { key: 'Enter', code: 'Enter', isComposing: false })
     await waitFor(() => expect(mocks.quickChat).toHaveBeenCalledWith(
       '你好',
-      'pi',
+      'opencode',
       undefined,
       'chat-1',
       'chat',
@@ -577,19 +588,9 @@ describe('ChatLandingPage keyboard submission', () => {
   })
 
   it('does not let a diagnostic readiness failure block a native chat launch', async () => {
-    const nativePiAgent: AgentInfo = {
-      ...piAgent,
-      capabilities: {
-        ...piAgent.capabilities,
-        aiProvider: {
-          ...piAgent.capabilities.aiProvider!,
-          credentialSource: 'runtime-or-workspace',
-        },
-      },
-    }
     mocks.useWorkspaces.mockImplementation(() => ({
       ...context(workspaces),
-      agents: [nativePiAgent],
+      agents: [nativeOpenCodeAgent],
     }))
     mocks.listAgentCredentials.mockResolvedValue([])
     mocks.detectWorkspaceCredential.mockResolvedValue({
@@ -601,11 +602,11 @@ describe('ChatLandingPage keyboard submission', () => {
     })
     mocks.getAgentRuntimeReadiness.mockResolvedValue({
       agents: {
-        pi: {
-          agent: 'pi',
-          displayName: 'Pi',
+        opencode: {
+          agent: 'opencode',
+          displayName: 'opencode',
           installed: true,
-          binPath: '/tmp/pi',
+          binPath: '/tmp/opencode',
           status: 'unknown',
           ready: false,
           source: 'unknown',
@@ -618,11 +619,11 @@ describe('ChatLandingPage keyboard submission', () => {
     })
     mocks.probeAgentRuntimeReadiness.mockResolvedValue({
       agents: {
-        pi: {
-          agent: 'pi',
-          displayName: 'Pi',
+        opencode: {
+          agent: 'opencode',
+          displayName: 'opencode',
           installed: true,
-          binPath: '/tmp/pi',
+          binPath: '/tmp/opencode',
           status: 'failed',
           ready: false,
           source: 'launcher-vault',
@@ -638,14 +639,14 @@ describe('ChatLandingPage keyboard submission', () => {
 
     render(<ChatLandingPage spec={{ params: { targetWsId: 'chat-1' } }} />)
 
-    expect((await screen.findByRole('button', { name: 'Select agent' })).textContent).toContain('Pi')
-    expect(screen.queryByText('Model, reasoning, and context are managed by Pi')).toBeNull()
+    expect((await screen.findByRole('button', { name: 'Select agent' })).textContent).toContain('opencode')
+    expect(screen.queryByText('Model, reasoning, and context are managed by opencode')).toBeNull()
     fireEvent.change(screen.getByPlaceholderText('Describe the task, question, or decision…'), { target: { value: 'hello' } })
     fireEvent.click(screen.getByRole('button', { name: 'Send' }))
 
     await waitFor(() => expect(mocks.quickChat).toHaveBeenCalledWith(
       'hello',
-      'pi',
+      'opencode',
       undefined,
       'chat-1',
       'chat',
@@ -659,19 +660,9 @@ describe('ChatLandingPage keyboard submission', () => {
   })
 
   it('submits only the explicit credential while its model and effort remain optional defaults', async () => {
-    const nativePiAgent: AgentInfo = {
-      ...piAgent,
-      capabilities: {
-        ...piAgent.capabilities,
-        aiProvider: {
-          ...piAgent.capabilities.aiProvider!,
-          credentialSource: 'runtime-or-workspace',
-        },
-      },
-    }
     mocks.useWorkspaces.mockImplementation(() => ({
       ...context(workspaces),
-      agents: [nativePiAgent],
+      agents: [nativeOpenCodeAgent],
     }))
     mocks.listAgentCredentials.mockResolvedValue([
       {
@@ -715,7 +706,7 @@ describe('ChatLandingPage keyboard submission', () => {
 
     await waitFor(() => expect(mocks.quickChat).toHaveBeenCalledWith(
       'Use DeepSeek.',
-      'pi',
+      'opencode',
       'deepseek-1',
       'chat-1',
       'chat',
@@ -744,7 +735,7 @@ describe('ChatLandingPage keyboard submission', () => {
 
     await waitFor(() => expect(mocks.quickChat).toHaveBeenCalledWith(
       'Go deeper.',
-      'pi',
+      'opencode',
       undefined,
       'chat-1',
       'chat',
@@ -758,19 +749,9 @@ describe('ChatLandingPage keyboard submission', () => {
 
 describe('ChatLandingPage AI source disclosure', () => {
   it('can explicitly use the runtime account without reading the Workspace AI source', async () => {
-    const nativePiAgent: AgentInfo = {
-      ...piAgent,
-      capabilities: {
-        ...piAgent.capabilities,
-        aiProvider: {
-          ...piAgent.capabilities.aiProvider!,
-          credentialSource: 'runtime-or-workspace',
-        },
-      },
-    }
     mocks.useWorkspaces.mockImplementation(() => ({
       ...context(workspaces),
-      agents: [nativePiAgent],
+      agents: [nativeOpenCodeAgent],
     }))
     mocks.listAgentCredentials.mockResolvedValue([{
       slug: 'deepseek-1',
@@ -791,7 +772,7 @@ describe('ChatLandingPage AI source disclosure', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'AI Provider, Model and reasoning' }))
     fireEvent.click(await screen.findByRole('menuitem', { name: /^AI Provider/ }))
-    fireEvent.click(screen.getByRole('menuitem', { name: /^Pi account/ }))
+    fireEvent.click(screen.getByRole('menuitem', { name: /^opencode account/ }))
     expect(mocks.rememberQuickChatLaunch).not.toHaveBeenCalled()
     expect(screen.getByRole('button', { name: 'AI Provider, Model and reasoning' }).textContent)
       .toContain('Default model')
@@ -800,7 +781,7 @@ describe('ChatLandingPage AI source disclosure', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Send' }))
     await waitFor(() => expect(mocks.quickChat).toHaveBeenCalledWith(
       'Use my account.',
-      'pi',
+      'opencode',
       undefined,
       'chat-1',
       'chat',
@@ -861,7 +842,7 @@ describe('ChatLandingPage AI source disclosure', () => {
 
     await waitFor(() => expect(mocks.quickChat).toHaveBeenCalledWith(
       'Continue.',
-      'pi',
+      'opencode',
       'deepseek-1',
       'chat-1',
       'chat',
@@ -876,17 +857,17 @@ describe('ChatLandingPage AI source disclosure', () => {
     workspaces = [withInteractivePreference(chatWorkspace(), {
       accessMode: 'native',
       model: 'gpt-5.6-sol',
-    }, 'codex')]
+    }, 'opencode')]
     mocks.useWorkspaces.mockImplementation(() => ({
       ...context(workspaces),
-      agents: [codexAgent],
-      defaultAgent: 'codex',
+      agents: [nativeOpenCodeAgent],
+      defaultAgent: 'opencode',
     }))
     mocks.getAgentRuntimeReadiness.mockResolvedValue({
       agents: {
-        codex: {
-          agent: 'codex',
-          displayName: 'Codex',
+        opencode: {
+          agent: 'opencode',
+          displayName: 'opencode',
           installed: true,
           binPath: '/tmp/codex',
           status: 'ready',
@@ -920,7 +901,7 @@ describe('ChatLandingPage AI source disclosure', () => {
       lastCredentialByAgent: {},
       recentChatWorkspaceId: 'chat-1',
       recentLaunch: {
-        agent: 'codex',
+        agent: 'opencode',
         accessMode: 'auto',
         credentialSlug: null,
         model: 'gpt-5.6-sol',
@@ -936,7 +917,7 @@ describe('ChatLandingPage AI source disclosure', () => {
 
     await waitFor(() => expect(mocks.quickChat).toHaveBeenCalledWith(
       'Use model defaults.',
-      'codex',
+      'opencode',
       undefined,
       'chat-1',
       'chat',
@@ -1056,7 +1037,7 @@ describe('Workspace embedded composer', () => {
     fireEvent.change(input, { target: { value: 'Inspect existing research' } })
     fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' })
     await waitFor(() => expect(mocks.quickChat).toHaveBeenCalledWith(
-      'Inspect existing research', 'pi', undefined, target.id, 'auto-quant-v2', undefined, undefined, undefined,
+      'Inspect existing research', 'opencode', undefined, target.id, 'auto-quant-v2', undefined, undefined, undefined,
       'terminal',
     ))
   })

@@ -459,25 +459,6 @@
         "native host"
       ],
       "arguments": "Explicit artifact arguments are required where shown; consult the runner/owner guide."
-    },
-    {
-      "id": "desktop-companion",
-      "path": "apps/desktop/src/companion-preview.ts",
-      "invocation": "pnpm -F @traderalice/desktop exec electron ../../dist/electron/companion-preview.js --smoke",
-      "owner": "desktop",
-      "lane": "system",
-      "kind": "artifact-acceptance",
-      "sideEffects": "starts the real isolated native Companion preview",
-      "prerequisites": [
-        "desktop build",
-        "native graphical Electron host"
-      ],
-      "platforms": [
-        "macOS-arm64",
-        "macOS-x64",
-        "Windows-x64"
-      ],
-      "arguments": "Explicit artifact arguments are required where shown; consult the runner/owner guide."
     }
   ]
 }

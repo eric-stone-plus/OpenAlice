@@ -61,6 +61,7 @@ vi.mock('react-i18next', () => ({
       'nav.expandRail': 'Expand activity bar',
       'nav.section.beta': 'Beta',
       'nav.section.system': 'System',
+      'nav.projects': 'Projects',
     })[key] ?? key,
   }),
 }))
@@ -101,6 +102,13 @@ describe('ActivityBar current destination', () => {
     mocks.railCollapsed = true
     view.rerender(<ActivityBar open onClose={vi.fn()} headerAction={<button>Collapse navigation</button>} />)
     expect(screen.queryByRole('button', { name: 'Collapse navigation' })).toBeNull()
+  })
+  it('labels the harness group as Projects only in the full rail', () => {
+    const view = render(<ActivityBar open onClose={vi.fn()} />)
+    expect(screen.getByText('Projects')).toBeTruthy()
+    mocks.railCollapsed = true
+    view.rerender(<ActivityBar open onClose={vi.fn()} />)
+    expect(screen.queryByText('Projects')).toBeNull()
   })
   it('exposes the visually active product area as the current page', () => {
     const { rerender } = render(<ActivityBar open onClose={vi.fn()} />)

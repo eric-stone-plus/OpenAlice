@@ -29,8 +29,6 @@ vi.mock('react-i18next', () => ({
       'nav.appearanceMenu': `Appearance: ${params?.mode}`,
       'nav.item.settings': 'Settings',
       'nav.item.connectors': 'Connectors',
-      'nav.showCompanion': 'Show pet',
-      'nav.hideCompanion': 'Hide pet',
       'nav.connectorNeedsAttention': '1 connector needs attention',
       'nav.updatesAvailable': `${(params as { count?: number })?.count} updates available`,
       'nav.updatesNeedAttention': `${(params as { count?: number })?.count} updates need attention`,
@@ -63,21 +61,6 @@ describe('ActivityBarUtilityMenu', () => {
     mocks.guidance = { availableCount: 1, needsAttentionCount: 1 }
     render(<ActivityBarUtilityMenu compactRail denseRail={false} onOpenSettings={vi.fn()} onOpenConnectors={vi.fn()} connectorWarnings={1} />)
     expect(screen.getByRole('status', { name: '1 updates need attention; 1 connector needs attention' })).toBeTruthy()
-  })
-  it('recovers a hidden companion from Alice Settings and then offers Hide pet', async () => {
-    let visible = false
-    const toggle = vi.fn(async () => { visible = !visible; return visible })
-    Object.defineProperty(window, 'openAlice', { configurable: true, value: { companion: {
-      getVisible: async () => visible, toggle, onVisibility: () => () => {},
-    } } })
-    const user = userEvent.setup()
-    render(<ActivityBarUtilityMenu compactRail={false} denseRail={false}
-      onOpenSettings={vi.fn()} onOpenConnectors={vi.fn()} />)
-    await user.click(screen.getByRole('button', { name: 'Alice’s Settings: Open application menu' }))
-    await user.click(await screen.findByRole('menuitem', { name: 'Show pet' }))
-    expect(toggle).toHaveBeenCalledOnce()
-    await user.click(screen.getByRole('button', { name: 'Alice’s Settings: Open application menu' }))
-    expect(await screen.findByRole('menuitem', { name: 'Hide pet' })).toBeTruthy()
   })
   it('keeps theme choices in an Appearance submenu', async () => {
     const user = userEvent.setup()

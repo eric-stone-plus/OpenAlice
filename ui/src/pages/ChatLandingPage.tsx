@@ -12,6 +12,7 @@ import { useTranslation } from 'react-i18next'
 import { AgentChatComposer } from '../components/workspace/AgentChatComposer'
 import { ConversationLayout } from '../components/conversation/ConversationLayout'
 import { PageTopBar } from '../components/PageTopBar'
+import { PetLogo } from '../components/PetLogo'
 import {
   BriefcaseBusiness,
   CalendarClock,
@@ -438,6 +439,7 @@ export function HarnessLandingPage({
         />
       )}
       <header className="flex flex-col items-center text-center">
+        <PetLogo />
         <h1 className="oa-harness-title max-w-[38rem] text-balance text-[24px] font-semibold leading-[30px] tracking-[-0.018em] text-foreground @min-[42rem]/harness:text-[28px] @min-[42rem]/harness:leading-[34px]">
           {t(`${copyKey}.heading`)}
         </h1>

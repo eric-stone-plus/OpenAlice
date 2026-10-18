@@ -286,7 +286,7 @@ export function WorkspaceAIConfigModal({
   wsId,
   onClose,
   onAiSaved,
-  initialAgent = 'claude',
+  initialAgent = 'opencode',
   initialSection = 'general',
 }: Props) {
   const { t } = useTranslation()

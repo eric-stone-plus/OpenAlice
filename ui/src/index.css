@@ -193,9 +193,10 @@ body {
 }
 
 @media (hover: hover) and (pointer: fine) {
-  .oa-harness-studio-entry .oa-studio-arrow { opacity: 0; }
-  .oa-harness-studio-entry > button:hover .oa-studio-arrow,
-  .oa-harness-studio-entry > button:focus-visible .oa-studio-arrow { opacity: 1; }
+  .oa-harness-nav-header:has([aria-current="page"]) .oa-harness-nav-actions {
+    opacity: 1;
+    pointer-events: auto;
+  }
 }
 
 :where(button, [role="button"], summary, a[href], select):not(:disabled):not([aria-disabled="true"]) {

@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url'
 import { ClientUpdateService } from './web-relay.js'
 import { runDemoSmoke } from './demo-smoke.js'
 import { createAppWindow } from './app-window.js'
+import { installCompanionActivity } from './companion-activity.js'
 import { fetchAliceWebRequest, handleOpenAliceIpcMessage, registerOpenAliceIpc } from './ipc.js'
 
 if (app.isPackaged) throw new Error('Electron demo is a source-development entry only')
@@ -84,8 +85,14 @@ void app.whenReady().then(async () => {
   protocol.handle('app', request => fetchAliceWebRequest(request, backend))
   Menu.setApplicationMenu(process.platform === 'darwin'
     ? Menu.buildFromTemplate([{ role: 'appMenu' }, { role: 'editMenu' }, { role: 'windowMenu' }]) : null)
-  const { window: win, companion } = createAppWindow(join(root, 'dist/electron/preload.js'), 'OpenAlice — Demo')
-  companion?.configureActivity({ identity: () => 'isolated-demo', read: async query => {
+  const { window: win } = createAppWindow(join(root, 'dist/electron/preload.js'), 'OpenAlice — Demo')
+  let activity: ReturnType<typeof installCompanionActivity> | undefined
+  try {
+    activity = installCompanionActivity(win)
+  } catch (error) {
+    console.error('[activity] demo startup failed:', error)
+  }
+  activity?.configure({ identity: () => 'isolated-demo', read: async query => {
     const response = await fetchAliceWebRequest(new Request(`app://openalice/api/agent-runtime${query}`), backend)
     if (!response.ok) throw new Error('Demo activity unavailable')
     return response.json()

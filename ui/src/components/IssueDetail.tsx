@@ -43,6 +43,7 @@ import { useIssueDetail } from '../hooks/useIssueDetail'
 import { useWorkspaceSessionDirectory } from '../hooks/useWorkspaceSessionDirectory'
 import { useWorkspaces } from '../contexts/workspaces-context'
 import { formatRelativeTime } from '../lib/intl'
+import { visibleAgentRuntimes } from '../lib/agentRuntimeVisibility'
 import { useInboxRead } from '../live/inbox-read'
 import { useInboxSelection } from '../live/inbox-selection'
 import { previewForEntry } from '../live/inbox-threads'
@@ -143,10 +144,10 @@ function AgentEditor({
   onConfigure: (agent: AgentId) => void
 }) {
   const { t } = useTranslation()
-  const selected = value ?? ''
+  const selected = value && options.some((agent) => agent.id === value) ? value : ''
   const issueDefaultInOptions = issueDefaultAgent && options.some((a) => a.id === issueDefaultAgent) ? issueDefaultAgent : null
   const defaultInOptions = defaultAgent && options.some((a) => a.id === defaultAgent) ? defaultAgent : null
-  const effectiveAgent = value || issueDefaultInOptions || defaultInOptions || options[0]?.id || null
+  const effectiveAgent = selected || issueDefaultInOptions || defaultInOptions || options[0]?.id || null
   const canConfigure = isConfigurableAgent(effectiveAgent)
   const defaultLabel = issueDefaultInOptions
     ? t('issues.detail.defaultRuntime', {
@@ -184,9 +185,6 @@ function AgentEditor({
             </option>
           )
         })}
-        {value && !options.some((agent) => agent.id === value) && (
-          <option value={value}>{value}</option>
-        )}
       </select>
       <Button
         type="button"
@@ -661,8 +659,9 @@ function PropertiesRail({
     update: PausedSessionRuntimeUpdate
   } | null>(null)
   const [runtimeError, setRuntimeError] = useState<string | null>(null)
-  const issueDefaultInOptions = issueDefaultAgent && agents.some((a) => a.id === issueDefaultAgent) ? issueDefaultAgent : null
-  const defaultInOptions = defaultAgent && agents.some((a) => a.id === defaultAgent) ? defaultAgent : null
+  const agentOptions = visibleAgentRuntimes(agents).filter((agent) => agent.kind !== 'utility')
+  const issueDefaultInOptions = issueDefaultAgent && agentOptions.some((a) => a.id === issueDefaultAgent) ? issueDefaultAgent : null
+  const defaultInOptions = defaultAgent && agentOptions.some((a) => a.id === defaultAgent) ? defaultAgent : null
   const ownerResumeId = issue.assignee.startsWith('@resume-')
     ? issue.assignee.slice(1)
     : null
@@ -677,7 +676,8 @@ function PropertiesRail({
     : directoryOwner
   const ownerResolved = Boolean(ownerSession)
   const ownerResolutionLoaded = Boolean(authoritativeOwner) || sessionsLoaded
-  const effectiveAgent = authoritativeOwner?.agent || directoryOwner?.agent || issue.agent || issueDefaultInOptions || defaultInOptions || agents[0]?.id || null
+  const issueAgentInOptions = issue.agent && agentOptions.some((a) => a.id === issue.agent) ? issue.agent : null
+  const effectiveAgent = authoritativeOwner?.agent || directoryOwner?.agent || issueAgentInOptions || issueDefaultInOptions || defaultInOptions || agentOptions[0]?.id || null
   const selectedReadiness = effectiveAgent ? agentReadiness[effectiveAgent] : undefined
   const [credentialOptions, setCredentialOptions] = useState<{
     agent: string
@@ -807,7 +807,7 @@ function PropertiesRail({
                       value={issue.agent}
                       issueDefaultAgent={issueDefaultAgent}
                       defaultAgent={defaultAgent}
-                      options={agents}
+                      options={agentOptions}
                       readiness={agentReadiness}
                       disabled={saving}
                       onChange={(agent) => {
@@ -1759,9 +1759,17 @@ export function IssueDetail({
     [gotoEntity, gotoIssue],
   )
 
-  const agentOptions = agents.filter(
+  const visibleAgentOptions = visibleAgentRuntimes(agents).filter(
     (agent) => agent.kind !== 'utility',
   )
+  const visibleWorkspaceIssueDefaultAgent = workspaceIssueDefaultAgent
+    && visibleAgentOptions.some((agent) => agent.id === workspaceIssueDefaultAgent)
+    ? workspaceIssueDefaultAgent
+    : issueDefaultAgent
+  const visibleWorkspaceLegacyDefaultAgent = workspaceLegacyDefaultAgent
+    && visibleAgentOptions.some((agent) => agent.id === workspaceLegacyDefaultAgent)
+    ? workspaceLegacyDefaultAgent
+    : defaultAgent
 
   const onPatch = useCallback(
     async (patch: IssuePatch): Promise<boolean> => {
@@ -1896,9 +1904,9 @@ export function IssueDetail({
         <PropertiesRail
           wsId={wsId}
           issue={issue}
-          agents={agentOptions}
-          issueDefaultAgent={workspaceIssueDefaultAgent}
-          defaultAgent={workspaceLegacyDefaultAgent}
+          agents={agents}
+          issueDefaultAgent={visibleWorkspaceIssueDefaultAgent}
+          defaultAgent={visibleWorkspaceLegacyDefaultAgent}
           headlessRuntime={workspace?.runtimeSettings?.runtime.headless ?? null}
           agentReadiness={agentReadiness}
           sessions={sessionDirectory}

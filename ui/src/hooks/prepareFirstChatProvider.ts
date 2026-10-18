@@ -8,7 +8,7 @@ export async function prepareFirstChatProvider(credentialSlug: string, model?: s
   if (workspace.runtimeSettingsError) throw new Error(workspace.runtimeSettingsError)
   if (interactive?.defaultAgent || interactive?.recent.agent || Object.keys(interactive?.agents ?? {}).length > 0) return
   await updateWorkspaceRuntimeDefaults(workspace.id, {
-    interactive: { defaultAgent: 'pi', agents: { pi: { accessMode: 'vault', credentialSlug, ...(model ? { model } : {}) } } },
+    interactive: { defaultAgent: 'opencode', agents: { opencode: { accessMode: 'vault', credentialSlug, ...(model ? { model } : {}) } } },
     headless: { defaultAgent: existing?.headless.defaultAgent ?? null, agents: existing?.headless.agents ?? {} },
   })
 }

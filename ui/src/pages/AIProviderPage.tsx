@@ -17,7 +17,7 @@
 
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Check, ChevronDown, Plus } from 'lucide-react'
+import { Check, Plus } from 'lucide-react'
 import { api, type Preset, type WireShape } from '../api'
 import type {
   CredentialSummary,
@@ -46,6 +46,7 @@ import { notifyWorkspaceDefaultsChanged } from '../lib/workspaceAiEvents'
 import type { AgentInfo } from '../components/workspace/api'
 import { useAgentRuntimes } from '../hooks/useAgentRuntimes'
 import { AgentRuntimeIcon } from '../lib/agentRuntimeIcon'
+import { visibleAgentRuntimes } from '../lib/agentRuntimeVisibility'
 import { AIProviderIcon } from '../lib/aiProviderIcon'
 import { useWorkspace } from '../tabs/store'
 import { Button } from '../components/ui/button'
@@ -59,7 +60,11 @@ function credentialLabel(cred: Pick<CredentialSummary, 'slug' | 'vendor' | 'labe
 export function AIProviderPage() {
   const { t } = useTranslation()
   const openOrFocus = useWorkspace((state) => state.openOrFocus)
-  const { agents } = useAgentRuntimes()
+  const { agents: discoveredAgents } = useAgentRuntimes()
+  const agents = useMemo(
+    () => visibleAgentRuntimes(discoveredAgents).filter((agent) => agent.kind !== 'utility'),
+    [discoveredAgents],
+  )
   const [credentials, setCredentials] = useState<CredentialSummary[] | null>(null)
   const [credentialsLoadError, setCredentialsLoadError] = useState(false)
   const [presets, setPresets] = useState<Preset[]>([])
@@ -312,12 +317,6 @@ export function AIProviderPage() {
 
 const PRIMARY_DEFAULT_AGENTS = [
   { id: 'opencode', name: 'opencode' },
-  { id: 'pi', name: 'Pi' },
-] as const
-
-const ADVANCED_DEFAULT_AGENTS = [
-  { id: 'claude', name: 'Claude Code' },
-  { id: 'codex', name: 'Codex' },
 ] as const
 
 function WorkspaceDefaultsSection({
@@ -331,7 +330,6 @@ function WorkspaceDefaultsSection({
 }) {
   const { t } = useTranslation()
   const [data, setData] = useState<WorkspaceCredentialDefaultsResponse | null>(null)
-  const [showAdvanced, setShowAdvanced] = useState(false)
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle')
   const saveRevision = useRef(0)
   const [error, setError] = useState('')
@@ -355,11 +353,17 @@ function WorkspaceDefaultsSection({
     nextDefaults: Record<string, WorkspaceCredentialDefault>,
   ) => {
     if (!data) return
+    // This desktop build exposes only opencode. Drop creation defaults for
+    // adapters that are no longer offered so a later Workspace cannot inherit
+    // one through the installation-level defaults.
+    const visibleDefaults = Object.fromEntries(
+      Object.entries(nextDefaults).filter(([agentId]) => agents.some((agent) => agent.id === agentId)),
+    )
     const revision = ++saveRevision.current
     setSaveStatus('saving'); setError('')
-    setData({ ...data, defaults: nextDefaults }) // optimistic
+    setData({ ...data, defaults: visibleDefaults }) // optimistic
     try {
-      const res = await api.config.setWorkspaceCredentialDefaults(nextDefaults)
+      const res = await api.config.setWorkspaceCredentialDefaults(visibleDefaults)
       setData((d) => (d ? { ...d, defaults: res.defaults } : d))
       notifyWorkspaceDefaultsChanged()
       if (saveRevision.current === revision) {
@@ -542,27 +546,6 @@ function WorkspaceDefaultsSection({
       ) : (
         <div className="space-y-2.5">
           {PRIMARY_DEFAULT_AGENTS.map((a) => renderAgent(a))}
-
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={() => setShowAdvanced((v) => !v)}
-            aria-expanded={showAdvanced}
-            className="text-muted-foreground"
-          >
-            <ChevronDown
-              aria-hidden
-              className={`size-3.5 transition-transform duration-[var(--motion-fast)] ${showAdvanced ? 'rotate-180' : ''}`}
-            />
-            {t('aiProvider.advancedAgents')}
-          </Button>
-
-          {showAdvanced && (
-            <>
-              {ADVANCED_DEFAULT_AGENTS.map((a) => renderAgent(a))}
-            </>
-          )}
 
           {error && <p className="text-[12px] text-destructive">{error}</p>}
         </div>

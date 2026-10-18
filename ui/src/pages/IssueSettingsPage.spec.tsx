@@ -44,6 +44,8 @@ describe('IssueSettingsPage', () => {
     expect(document.querySelector(`label[for="${select.id}"]`)?.textContent).toBe('Agent runtime')
     expect(description?.textContent).toContain("each target Workspace's Session default")
     expect(description?.textContent).toContain('Alice fallback (opencode)')
+    expect(screen.getByRole('option', { name: 'opencode' })).toBeTruthy()
+    expect(screen.queryByRole('option', { name: 'Claude Code' })).toBeNull()
     expect(screen.queryByRole('option', { name: 'Shell' })).toBeNull()
   })
 })

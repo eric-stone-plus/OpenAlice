@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -31,6 +31,13 @@ describe('desktop shutdown marker', () => {
       pid: 4242,
       startedAt: '2026-10-18T00:00:00.000Z',
     })
+  })
+
+  it('leaves no temporary file behind after the atomic write', () => {
+    const value = home()
+    writeShutdownMarker(value, 4242)
+    expect(readShutdownMarker(value)?.pid).toBe(4242)
+    expect(readdirSync(join(value, 'state')).filter((name) => name.endsWith('.tmp'))).toEqual([])
   })
 
   it('treats missing and malformed markers as absent', () => {

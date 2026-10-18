@@ -84,6 +84,7 @@ import {
 import { WorkspaceActionsContext } from './workspace-actions-context'
 import { reconcileWorkspaceList } from './workspace-list-reconcile'
 import { reconcileJsonSnapshot } from '../lib/reconcile-json-state'
+import { visibleAgentRuntimes } from '../lib/agentRuntimeVisibility'
 import { useAgentRuntimes } from '../hooks/useAgentRuntimes'
 
 function deprecatedExportTab(agent: AgentId | undefined): Tab | undefined {
@@ -105,6 +106,7 @@ export function WorkspacesProvider({ children, renderContent }: { children: Reac
   const [autoPredictionPreferenceLoaded, setAutoPredictionPreferenceLoaded] = useState(false)
   const [autoPredictionPreferenceError, setAutoPredictionPreferenceError] = useState<string | null>(null)
   const { agents } = useAgentRuntimes()
+  const visibleAgents = useMemo(() => visibleAgentRuntimes(agents), [agents])
   const [defaultAgent, setDefaultAgentState] = useState<string | null>(null)
   const [issueDefaultAgent, setIssueDefaultAgentState] = useState<string | null>(null)
   const [listError, setListError] = useState<string | null>(null)
@@ -779,12 +781,24 @@ export function WorkspacesProvider({ children, renderContent }: { children: Reac
 
   const workspaceActions = useMemo(() => ({ openHeadlessRun }), [openHeadlessRun])
 
+  // A saved default may point at a runtime this build no longer offers. Keep
+  // the installation usable by surfacing the first visible runtime instead of
+  // handing the sidebar and Issue surfaces an id they cannot resolve.
+  const effectiveDefaultAgent = useMemo(() => {
+    if (defaultAgent !== null && visibleAgents.some((agent) => agent.id === defaultAgent)) return defaultAgent
+    return visibleAgents.find((agent) => agent.kind !== 'utility')?.id ?? null
+  }, [defaultAgent, visibleAgents])
+  const effectiveIssueDefaultAgent = useMemo(() => {
+    if (issueDefaultAgent !== null && visibleAgents.some((agent) => agent.id === issueDefaultAgent)) return issueDefaultAgent
+    return effectiveDefaultAgent
+  }, [effectiveDefaultAgent, issueDefaultAgent, visibleAgents])
+
   const contextValue = useMemo<WorkspacesContextValue>(() => ({
     workspaces,
     templates,
     agents,
-    defaultAgent,
-    issueDefaultAgent,
+    defaultAgent: effectiveDefaultAgent,
+    issueDefaultAgent: effectiveIssueDefaultAgent,
     listError,
     workspaceManager,
     workspaceManagerLoaded,
@@ -832,12 +846,12 @@ export function WorkspacesProvider({ children, renderContent }: { children: Reac
     autoQuantDefaultWorkspaceId,
     autoQuantPreferenceError,
     autoQuantPreferenceLoaded,
-    defaultAgent,
+    effectiveDefaultAgent,
+    effectiveIssueDefaultAgent,
     hasLoaded,
     initializeAutoQuant,
     initializeAutoPrediction,
     initializeChat,
-    issueDefaultAgent,
     listError,
     openAgentConfig,
     openHeadlessRun,
