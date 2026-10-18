@@ -55,14 +55,22 @@ export function createCompanion(owner: BrowserWindow): CompanionHandle | undefin
     : resolve(here, '../../ui/public/companion')
   const statePath = join(app.getPath('userData'), 'companion.json')
   let size = 220
-  let enabled = true
+  // The desktop pet is opt-in: a fresh profile starts with the companion
+  // hidden so it cannot cover the app window. The bottom-left application
+  // menu and the tray's Pet submenu show it on demand.
+  let enabled = false
   let saved: Partial<Rect> = {}
   let savedOffset = { x: 0, y: 0 }
   try {
     const value = JSON.parse(readFileSync(statePath, 'utf8'))
     if ([170, 220, 280].includes(value.size)) size = value.size
     if (typeof value.enabled === 'boolean') enabled = value.enabled
-    if (Number.isFinite(value.x) && Number.isFinite(value.y)) saved = { x: value.x, y: value.y }
+    // Older builds persisted the X11 origin before the first post-map
+    // placement, which parks the pet over the app window's top-left corner.
+    // Treat (0,0) as "no saved position" and fall back to the bottom-right.
+    if (Number.isFinite(value.x) && Number.isFinite(value.y) && (value.x !== 0 || value.y !== 0)) {
+      saved = { x: value.x, y: value.y }
+    }
     if (Number.isFinite(value.offsetX) && Number.isFinite(value.offsetY)) savedOffset = { x: value.offsetX, y: value.offsetY }
   } catch { /* First launch or damaged launcher preference: use defaults. */ }
   const area = screen.getDisplayMatching(owner.getBounds()).workArea
@@ -90,6 +98,10 @@ export function createCompanion(owner: BrowserWindow): CompanionHandle | undefin
   }
   const initialArea = screen.getDisplayMatching(visibleRect(initialVirtual)).workArea
   const settled = settleCompanion(initialVirtual, initialArea, false, insets)
+  // The position the pet should occupy after the window is mapped. Mutter
+  // ignores constructor bounds for a newly mapped window, so both the ready
+  // handler and the hidden-at-startup toggle path re-apply this position.
+  let intended = { x: settled.x, y: settled.y, area: initialArea }
   // Some WMs clamp a window's left/top edge to the screen. Keep the native
   // window inside the work area and translate the character inside it, so the
   // visible pet can still reach the left and top edges.
@@ -175,6 +187,7 @@ export function createCompanion(owner: BrowserWindow): CompanionHandle | undefin
     const currentVirtual = { ...current, x: current.x + visualOffset.x, y: current.y + visualOffset.y }
     const targetArea = screen.getDisplayMatching(visibleRect(currentVirtual)).workArea
     const next = settleCompanion(currentVirtual, targetArea, snap, visualInsets(current.width, current.height))
+    intended = { x: next.x, y: next.y, area: targetArea }
     flipped = next.flipped
     pet.webContents.send('openalice:companion:flip', flipped)
     if (!snap || reducedMotion) { moveVirtual(next.x, next.y, targetArea); save(); return }
@@ -189,11 +202,29 @@ export function createCompanion(owner: BrowserWindow): CompanionHandle | undefin
       if (progress === 1) { stopSnap(); moveVirtual(next.x, next.y, targetArea); save() }
     }, 16)
   }
+  // Mutter ignores constructor bounds for a newly mapped window. Both show
+  // paths (first launch and the hidden-at-startup toggle) re-apply the
+  // intended position once the window is mapped.
+  const reapplyIntended = () => {
+    if (!enabled || drag || pet.isDestroyed()) return
+    moveVirtual(intended.x, intended.y, intended.area)
+    save()
+  }
   const open = () => { if (!owner.isDestroyed()) { if (owner.isMinimized()) owner.restore(); owner.show(); owner.focus() } }
   const toggle = () => {
     if (pet.isDestroyed()) return
     enabled = !enabled
-    if (enabled && ready) { settle(false); pet.showInactive() } else pet.hide()
+    if (enabled && ready) {
+      // Use the last intended position rather than the current hidden-window
+      // bounds: Mutter may have parked the unmapped window at the origin.
+      moveVirtual(intended.x, intended.y, intended.area)
+      pet.showInactive()
+      // A pet that starts hidden (the default) never runs the ready handler's
+      // post-map move. Mutter places the newly mapped window on the active
+      // monitor and ignores the constructor bounds, so re-apply the intended
+      // position once it is mapped or the pet lands over the app window.
+      setTimeout(reapplyIntended, 150)
+    } else pet.hide()
     save()
     if (!owner.isDestroyed()) owner.webContents.send('openalice:companion:visibility', enabled)
   }
@@ -286,11 +317,7 @@ export function createCompanion(owner: BrowserWindow): CompanionHandle | undefin
     // Mutter places a newly mapped window on the active monitor and ignores
     // the bounds passed to the constructor. A post-map move is honored, so
     // re-apply the intended virtual position once the window is visible.
-    setTimeout(() => {
-      if (!enabled || drag || pet.isDestroyed()) return
-      moveVirtual(settled.x, settled.y, initialArea)
-      save()
-    }, 150)
+    setTimeout(reapplyIntended, 150)
   })
   listen('reduced-motion', value => { if (typeof value === 'boolean') reducedMotion = value })
   listen('interactive', value => { if (typeof value === 'boolean') pet.setIgnoreMouseEvents(drag ? false : !value, { forward: true }) })

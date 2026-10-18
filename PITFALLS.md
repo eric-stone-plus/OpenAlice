@@ -283,7 +283,7 @@ session. Call `app.disableHardwareAcceleration()` on Linux before
 
 The Quick Start header no longer renders the `aliceWave` hero image, and the
 bottom-left application-menu avatar now uses `ui/src/assets/alice-pet-avatar.png`
-(a 256x256 crop of the same pet image).
+(a 256x256 centered head crop of the same pet image, bow and chin included).
 
 For Fedora, the `rpm` target is the native install path; it needs `rpmbuild`
 (`sudo dnf install rpm-build`). The built RPM
@@ -331,8 +331,15 @@ Two multi-monitor details matter:
   left edge of a secondary display restores on the primary.
 - Mutter places a newly mapped window on the active monitor and ignores the
   constructor bounds. The `ready` handler shows the pet, then re-applies the
-  intended virtual position 150ms later with `moveVirtual`; without it a fresh
-  profile's pet lands at the primary work-area origin.
+  intended virtual position 150ms later with `moveVirtual`; the toggle path
+  does the same because a pet that starts hidden never runs the ready
+  handler's move. Without either move a fresh profile's pet lands at the
+  primary work-area origin and covers the app window.
+- The companion is opt-in: `enabled` defaults to false, so a fresh profile
+  starts without a desktop pet. The bottom-left application menu and the
+  tray's Pet submenu show it on demand. A persisted `(0,0)` position is the
+  legacy pre-placement origin, not a user drag; treat it as "no saved
+  position" and restore the default bottom-right corner.
 
 The unit tests in `apps/desktop/src/companion-geometry.spec.ts` cover the
 portrait-screen edges: the visible left/top/right/bottom reach the work-area

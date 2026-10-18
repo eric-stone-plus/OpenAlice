@@ -8,6 +8,9 @@ import { createCompanion, resizeCompanionWindow, setCompanionBounds } from './co
 
 const home = mkdtempSync(join(tmpdir(), 'openalice-companion-'))
 app.setPath('userData', home)
+// The desktop pet is opt-in for users; this isolated acceptance run explicitly
+// enables it so the native show path stays covered.
+writeFileSync(join(home, 'companion.json'), JSON.stringify({ enabled: true }))
 app.on('window-all-closed', () => app.quit())
 void app.whenReady().then(async () => {
   const owner = new BrowserWindow({ show: false, width: 900, height: 700 })
