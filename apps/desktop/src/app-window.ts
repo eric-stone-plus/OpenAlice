@@ -10,7 +10,7 @@ const here = dirname(fileURLToPath(import.meta.url))
 function resolveWindowIcon(): string {
   return app.isPackaged
     ? join(process.resourcesPath, 'icon.png')
-    : join(here, '../../apps/desktop/build/icon-pet.png')
+    : join(here, '../../apps/desktop/build/icons/256x256.png')
 }
 
 export interface AppWindow {

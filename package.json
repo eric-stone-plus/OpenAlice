@@ -198,7 +198,7 @@
       ],
       "category": "Office;Finance",
       "packageCategory": "misc",
-      "icon": "apps/desktop/build/icon-pet.png",
+      "icon": "apps/desktop/build/icons",
       "maintainer": "OpenAlice Contributors <openalice@users.noreply.github.com>",
       "vendor": "OpenAlice Contributors",
       "synopsis": "File-based trading agent workspace",
@@ -265,7 +265,7 @@
         ]
       },
       {
-        "from": "apps/desktop/build/icon-pet.png",
+        "from": "apps/desktop/build/icons/256x256.png",
         "to": "icon.png"
       },
       {
