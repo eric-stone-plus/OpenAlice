@@ -64,10 +64,11 @@ describe('opencode runtime flags', () => {
   });
 });
 
-it('preserves process config while selecting the ACP model without unsupported flags', () => {
-  const projected = opencodeAdapter.sessionRuntime!.project({ cwd: '/workspace', env: { OPENCODE_CONFIG_CONTENT: '{"theme":"system"}' } }, runtime);
+it('projects the app overlay without rewriting the process config', () => {
+  const processEnv = { OPENCODE_CONFIG_CONTENT: '{"theme":"system"}' };
+  const projected = opencodeAdapter.sessionRuntime!.project({ cwd: '/workspace', env: processEnv }, runtime);
+  expect(processEnv).toEqual({ OPENCODE_CONFIG_CONTENT: '{"theme":"system"}' });
   expect(JSON.parse(projected.env['OPENCODE_CONFIG_CONTENT']!)).toEqual({
-    theme: 'system',
     default_agent: 'trade',
     agent: { trade: OPENCODE_TRADE_AGENT },
     model: 'openai/gpt-5.6-sol',
@@ -75,21 +76,18 @@ it('preserves process config while selecting the ACP model without unsupported f
   expect(opencodeAdapter.composeWebCommand!([], { cwd: '/workspace', env: projected.env, sessionRuntime: projected })).toEqual(['opencode', 'acp']);
 });
 
-it('does not inject a permission override without a model override', () => {
+it('does not inject a top-level permission override without a model override', () => {
   const projected = opencodeAdapter.sessionRuntime!.project(
     { cwd: '/workspace', env: { OPENCODE_CONFIG_CONTENT: '{"theme":"system","permission":"ask"}' } },
     { binding: { version: 1, credential: { source: 'native' } }, ai: null },
   );
-  // The inherited process/terminal config survives, the Trade profile is
-  // added, and no top-level permission override is injected.
+  // The overlay adds the Trade profile; permissions stay scoped to that agent.
   const config = JSON.parse(projected.env['OPENCODE_CONFIG_CONTENT']!);
   expect(config).toEqual({
-    theme: 'system',
-    permission: 'ask',
     default_agent: 'trade',
     agent: { trade: OPENCODE_TRADE_AGENT },
   });
-  expect(config.permission).toBe('ask');
+  expect(config.permission).toBeUndefined();
 });
 
 it('matches the terminal wrapper environment and leaves auto-update enabled', () => {

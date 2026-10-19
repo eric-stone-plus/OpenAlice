@@ -347,46 +347,25 @@ export const opencodeAdapter: CliAdapter = {
       // of the shared opencode config. OPENCODE_CONFIG_CONTENT merges over the
       // global config (verified against the installed opencode ACP server:
       // model, effort, and the auto/goal agents survive), so the terminal keeps
-      // its generic default while OpenAlice sessions can select Trade.
-      const inheritedRaw = _ctx.env['OPENCODE_CONFIG_CONTENT'];
-      let inherited: Record<string, unknown> = {};
-      if (inheritedRaw) {
-        let parsed: unknown;
-        try {
-          parsed = JSON.parse(inheritedRaw);
-        } catch (err) {
-          throw new Error(`OPENCODE_CONFIG_CONTENT must contain valid JSON: ${(err as Error).message}`);
-        }
-        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-          throw new Error('OPENCODE_CONFIG_CONTENT must contain a JSON object');
-        }
-        inherited = parsed as Record<string, unknown>;
-      }
-      const inheritedAgents = inherited['agent'];
-      const inheritedProvider = inherited['provider'];
+      // its generic default while OpenAlice sessions can select Trade. The
+      // parent env's copy is stripped by spawn-env.ts; re-merging it here
+      // would only resurrect a stale value.
       const overlay: Record<string, unknown> = {
-        ...inherited,
         // App-spawned TUIs have no `--agent` flag; the default agent makes the
         // bare TUI open Trade while the terminal's global config keeps its own
         // default. Web and headless select Trade explicitly.
         default_agent: OPENCODE_TRADE_AGENT_ID,
         agent: {
-          ...(inheritedAgents && typeof inheritedAgents === 'object' && !Array.isArray(inheritedAgents)
-            ? inheritedAgents as Record<string, unknown>
-            : {}),
           [OPENCODE_TRADE_AGENT_ID]: OPENCODE_TRADE_AGENT,
         },
       };
       if (ai && (ai.apiKey || ai.baseUrl)) {
         overlay['provider'] = {
-          ...(inheritedProvider && typeof inheritedProvider === 'object' && !Array.isArray(inheritedProvider)
-            ? inheritedProvider as Record<string, unknown>
-            : {}),
           [OPENCODE_SESSION_PROVIDER_NAME]: openCodeProvider(ai, 'OpenAlice Session provider'),
         };
       }
       // ACP has no --model flag. Its native config selects the default model
-      // for session/new; keep this process-local and preserve other settings.
+      // for session/new; keep this process-local.
       if (selectedModel) overlay['model'] = selectedModel;
       env['OPENCODE_CONFIG_CONTENT'] = JSON.stringify(overlay);
       // Do not add a top-level permission override: the terminal's opencode

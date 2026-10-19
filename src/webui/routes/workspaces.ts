@@ -382,7 +382,7 @@ export function createWorkspaceRoutes(
       readonly model?: string;
       readonly reasoningEffort?: ModelReasoningEffort;
       /** Runtime primary-agent mode (opencode: trade), applied before the first prompt. */
-      readonly agentMode?: string;
+      readonly agentMode?: 'trade';
       /** Birth stamp when allocating a new product Session (omit when resuming). */
       readonly createdBy?: SessionCreatedBy;
     },
