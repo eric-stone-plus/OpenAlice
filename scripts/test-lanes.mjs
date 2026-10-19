@@ -20,6 +20,7 @@ export const ownerSuites = {
       'src/tool',
       'src/webui',
       'packages/opentypebb',
+      'packages/sealing-key',
       'packages/update-lifecycle',
     ],
   },

@@ -15,6 +15,7 @@ import type { WorkspaceService } from '../workspaces/service.js'
 import type { InboxOrigin } from '../core/inbox-store.js'
 import { extractMcpShape, wrapToolExecute } from '../core/mcp-export.js'
 import { registerCliRoutes } from './cli.js'
+import { localAuthMiddleware } from './local-auth.js'
 import { resolveInboxOrigin } from './inbox-origin.js'
 import { createWorkspaceConversationControl } from '../workspaces/conversation-control.js'
 import { sessionCoworkerLabel } from '../workspaces/session-registry.js'
@@ -39,16 +40,18 @@ import { sessionCoworkerLabel } from '../workspaces/session-registry.js'
  *   GET  /cli/:wsId/:export/manifest   Same identity-by-URL trick — the gateway
  *   POST /cli/:wsId/:export/invoke     for the workspace-local CLIs (alice*, traderhub)
  *                              (`:export` = data | workspace; see ./cli.ts).
- *                              Reuses this server's port so the shim needs no
- *                              token.
+ *                              Reuses this server's port; the shim carries the
+ *                              local bearer token.
  *
- * SECURITY POSTURE: this whole listener is UNAUTHENTICATED and binds
- * 127.0.0.1 only (see the serve() call). The tool surface includes trading;
- * its protection is the loopback boundary — every consumer (agent CLIs, the
- * `alice*` shims) is a local workspace subprocess. There is no auth layer
- * because there is intentionally no remote caller; the wsId in the path is
- * routing, not a secret. Remote/multi-user access belongs to the web port,
- * which gates on the admin token. Do NOT make this honor OPENALICE_BIND_HOST.
+ * SECURITY POSTURE: loopback-only, and every request must carry the local
+ * bearer token (`~/.openalice/auth/local.token`, injected into workspace
+ * spawns). The token is not a same-UID boundary — a process running as the
+ * same user can read the file or the process environment — but it removes the
+ * unauthenticated local surface, stops other local users and browser pages,
+ * and makes accidental use by unrelated tools fail closed. The wsId in the
+ * path is routing, not a secret. Remote/multi-user access belongs to the web
+ * port, which gates on the admin token. Do NOT make this honor
+ * OPENALICE_BIND_HOST.
  *
  * Holds references to both registries and the WorkspaceService (for wsId
  * registry lookup). Tools are rebuilt per-request so disable/enable +
@@ -67,6 +70,10 @@ export class McpPlugin implements Plugin {
     /** Lazy because WorkspaceService is created later (deferred during web
      *  plugin start); McpPlugin starts earlier. Resolved at request time. */
     private getWorkspaceService: () => WorkspaceService | null,
+    /** Bearer token required by every MCP/CLI request. Required: a caller
+     *  cannot accidentally expose the trading-capable tool surface by
+     *  omitting it. */
+    private localToken: string,
   ) {}
 
   async start(_ctx: EngineContext) {
@@ -197,9 +204,12 @@ export class McpPlugin implements Plugin {
 
     const app = new Hono()
 
+    app.use('*', localAuthMiddleware(this.localToken))
+
     // Native MCP clients send no Origin. A browser page always does, and the
-    // loopback listener has no token gate; reject it before the transport so
-    // a website cannot drive the trading-capable tool surface.
+    // loopback listener has no browser session; reject it before the transport
+    // so a website cannot drive the trading-capable tool surface. The local
+    // token middleware above is the actual authorization boundary.
     app.use('*', async (c, next) => {
       if (c.req.header('origin')) return c.json({ error: 'origin_not_allowed' }, 403)
       await next()
@@ -250,22 +260,23 @@ export class McpPlugin implements Plugin {
       inboxStore,
       entityStore,
       getWorkspaceService,
+      localToken: this.localToken,
     })
 
     // LOOPBACK-ONLY, ALWAYS — deliberately NOT honoring OPENALICE_BIND_HOST.
     // This listener carries the full tool surface (trading included) and the
-    // CLI gateway with NO authentication: its security model is "only local
-    // processes can reach it". Its sole consumers are workspace subprocesses
-    // (native agent CLIs + the CLI shims), which run on the same host
-    // and always dial 127.0.0.1 — so there is no legitimate remote caller to
-    // serve. Remote access is the web port's job (47331), which gates on the
-    // admin token. Without an explicit hostname @hono/node-server binds the
-    // wildcard address, which exposed this surface to the LAN; pinning
-    // loopback closes that structurally rather than via an auth layer the
-    // zero-config CLI injection can't carry. In Docker, OPENALICE_BIND_HOST
-    // =0.0.0.0 still applies to the web plugin; MCP stays on container-local
-    // loopback and is reached by in-container workspaces — only 47331 is
-    // published, so nothing external could reach MCP regardless.
+    // CLI gateway behind the local bearer token. Loopback is defense in depth,
+    // not authentication: a same-UID process can read the token file, but a
+    // different local user or a browser page cannot reach the surface. Its
+    // sole consumers are workspace subprocesses (native agent CLIs + the CLI
+    // shims), which run on the same host and always dial 127.0.0.1. Remote
+    // access is the web port's job (47331), which gates on the admin token.
+    // Without an explicit hostname @hono/node-server binds the wildcard
+    // address, which exposed this surface to the LAN; pinning loopback closes
+    // that structurally as well. In Docker, OPENALICE_BIND_HOST=0.0.0.0 still
+    // applies to the web plugin; MCP stays on container-local loopback and is
+    // reached by in-container workspaces — only 47331 is published, so nothing
+    // external could reach MCP regardless.
     this.server = serve({ fetch: app.fetch, port: this.port, hostname: '127.0.0.1' }, (info) => {
       console.log(`mcp plugin listening on http://127.0.0.1:${info.port}/mcp (+ /mcp/:wsId, /cli)`)
     })

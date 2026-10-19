@@ -17,6 +17,7 @@ if ([...flags].some(flag => !['--skip-build', '--smoke'].includes(flag))) {
 const pnpm = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm'
 if (!process.argv.includes('--skip-build')) {
   for (const args of [
+    ['-F', '@traderalice/sealing-key', 'build'],
     ['-F', '@traderalice/guardian-runtime', 'build'],
     ['-F', '@traderalice/connector-protocol', 'build'],
     ['electron:tsc'],

@@ -1,5 +1,6 @@
 import { newsActivityPayload } from './domain/news/activity.js'
 import { publishCliEndpoint } from './server/cli-endpoint.js'
+import { ensureLocalToken } from './server/local-auth.js'
 import { createMarketBarsTools } from './tool/market-bars.js'
 import {
   acquireOpenAliceRuntimeLocks,
@@ -96,6 +97,10 @@ async function main() {
   printLegacyDataNotice('[alice]')
 
   const config = await loadConfig()
+  // One local bearer token for the workspace CLI, MCP, and UTA loopback
+  // surfaces. It is provisioned before any child or plugin starts.
+  const localToken = await ensureLocalToken(userDataHome)
+  process.env['OPENALICE_LOCAL_TOKEN'] = localToken
 
   const toolCallLog = await createToolCallLog()
 
@@ -143,7 +148,7 @@ async function main() {
   }
   const utaDisabled = currentTradingModePolicy().mode === 'lite'
   const utaUrl = resolveUTAUrl()
-  const utaClient = createUTAClient({ baseUrl: utaUrl })
+  const utaClient = createUTAClient({ baseUrl: utaUrl, token: localToken })
   if (utaDisabled) {
     console.warn('uta: disabled by trading mode lite — continuing without trading carrier')
   } else {
@@ -356,6 +361,7 @@ async function main() {
       inboxStore,
       entityStore,
       () => workspaceServiceRef.current,
+      localToken,
     ))
   } else if (!localCliOnWeb && config.mcp.port) {
     corePlugins.push(new LocalToolGatewayPlugin(config.mcp.port, {
@@ -364,6 +370,7 @@ async function main() {
       inboxStore,
       entityStore,
       getWorkspaceService: () => workspaceServiceRef.current,
+      localToken,
     }))
   }
 
@@ -376,6 +383,7 @@ async function main() {
         toolBaseUrl,
         ...(mcpBaseUrl ? { mcpBaseUrl } : {}),
         localCliOnWeb,
+        localToken,
         listen: webTransport !== 'ipc',
         ...(process.env['OPENALICE_TOOL_SOCKET'] ? { cliSocketPath: process.env['OPENALICE_TOOL_SOCKET'] } : {}),
         // The packaged Workspace acceptance exercises the real scanner without

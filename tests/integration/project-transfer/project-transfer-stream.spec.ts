@@ -14,7 +14,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join, posix } from 'node:path'
 import { promisify } from 'node:util'
 
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { writeAliceProjectProductStamp } from '../../../packages/cli/src/alice-project-product.ts'
 import { planProjectTransfer } from '../../../packages/cli/src/project-transfer.ts'
@@ -29,8 +29,16 @@ import {
 
 const roots: string[] = []
 const execFile = promisify(execFileCallback)
+let savedSealingBackend: string | undefined
+
+beforeEach(() => {
+  savedSealingBackend = process.env['OPENALICE_SEALING_BACKEND']
+  process.env['OPENALICE_SEALING_BACKEND'] = 'file'
+})
 
 afterEach(async () => {
+  if (savedSealingBackend === undefined) delete process.env['OPENALICE_SEALING_BACKEND']
+  else process.env['OPENALICE_SEALING_BACKEND'] = savedSealingBackend
   await Promise.all(roots.splice(0).map((path) => rm(path, { recursive: true, force: true })))
 })
 

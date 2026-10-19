@@ -23,6 +23,9 @@
     "typescript": "^5.9.3",
     "vitest": "^4.1.5"
   },
+  "dependencies": {
+    "@traderalice/sealing-key": "workspace:*"
+  },
   "engines": {
     "node": ">=22.19.0"
   },

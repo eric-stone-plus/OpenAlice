@@ -7,6 +7,7 @@ import { DispatchDelivery } from './dispatch-delivery.js';
 import { inboxFiles } from '@traderalice/connector-protocol'
 import { headlessFailureSummary } from './headless-failure.js';
 import { userDataHome } from '../core/paths.js';
+import { localTokenPath } from '../server/local-auth.js';
 import { resolveAliceProjectIdentity } from '@traderalice/guardian-runtime';
 /**
  * Composition root for the Workspaces feature.
@@ -298,6 +299,33 @@ function discloseEnvironmentValue(
   }
   return { key, source, presentation: 'value', value };
 }
+
+const LAUNCHER_OWNED_ADAPTER_ENV = new Set([
+  'PATH',
+  'HOME',
+  'NODE_OPTIONS',
+  'LD_PRELOAD',
+  'LD_LIBRARY_PATH',
+  'DYLD_INSERT_LIBRARIES',
+  'DYLD_LIBRARY_PATH',
+  'BASH_ENV',
+  'ENV',
+  'OPENALICE_MCP_URL',
+  'OPENALICE_TOOL_URL',
+  'OPENALICE_TOOL_SOCKET',
+  'OPENALICE_LOCAL_TOKEN',
+  'OPENALICE_LOCAL_TOKEN_FILE',
+  'OPENALICE_HOME',
+  'OPENALICE_PROJECT_ID',
+  'OPENALICE_GLOBAL_DIR',
+  'OPENALICE_SEALING_BACKEND',
+  'OPENALICE_SYSTEMD_CREDS',
+  'OPENALICE_WORKSPACE_CLI_BIN_PATH',
+  'OPENALICE_TERMINAL_THEME',
+  'AQ_WS_ID',
+  'AQ_RUN_ID',
+  'AQ_SESSION_ID',
+])
 
 export function launchEnvironmentDisclosure(
   env: Readonly<Record<string, string>>,
@@ -1253,6 +1281,12 @@ export async function createWorkspaceService(opts: CreateWorkspaceServiceOptions
       // path and does not require MCP to be enabled.
       OPENALICE_TOOL_URL: opts.toolBaseUrl,
       ...(opts.toolSocketPath ? { OPENALICE_TOOL_SOCKET: opts.toolSocketPath } : {}),
+      ...(process.env['OPENALICE_LOCAL_TOKEN']
+        ? {
+            OPENALICE_LOCAL_TOKEN: process.env['OPENALICE_LOCAL_TOKEN'],
+            OPENALICE_LOCAL_TOKEN_FILE: localTokenPath(userDataHome),
+          }
+        : {}),
       ...(opts.mcpBaseUrl ? { OPENALICE_MCP_URL: opts.mcpBaseUrl } : {}),
       // Prepend the `alice` CLI shim dir so the workspace agent can invoke it
       // from its shell (it reads OPENALICE_TOOL_URL + AQ_WS_ID above). Shared
@@ -1296,6 +1330,13 @@ export async function createWorkspaceService(opts: CreateWorkspaceServiceOptions
       ...(adapter.composeEnv?.(baseCtx) ?? {}),
       ...(projection?.env ?? {}),
     };
+    // Workspace-local adapter env (for example Codex's .codex/env.json) is
+    // user-authored. It must never override the launcher's MCP URL, local
+    // bearer token, tool endpoint, or the env vars that decide which binary
+    // and config the child loads.
+    for (const key of Object.keys(adapterEnv)) {
+      if (LAUNCHER_OWNED_ADAPTER_ENV.has(key)) delete adapterEnv[key];
+    }
     const env = { ...baseEnv, ...adapterEnv };
     const commandCtx = { ...baseCtx, env };
 
@@ -3068,6 +3109,12 @@ export async function createWorkspaceService(opts: CreateWorkspaceServiceOptions
       throw new Error(`${adapter.displayName} has no Web conversation surface; open it in the terminal instead`);
     }
     if (opts.runtimeSelection) {
+      if (adapter.capabilities.aiProvider?.nativeOnly
+        && (opts.runtimeSelection.model !== undefined || opts.runtimeSelection.reasoningEffort !== undefined)) {
+        throw Object.assign(new Error('This runtime is native-only; its model and effort are pinned by OpenAlice.'), {
+          code: 'native_only',
+        })
+      }
       const identity = resumeRegistry.get(record.resumeId);
       if (!identity || identity.lifecycle === 'retired') throw new Error('Session identity is unavailable');
       // Resolve before stopping: invalid credentials must leave the current child intact.
@@ -3168,8 +3215,12 @@ export async function createWorkspaceService(opts: CreateWorkspaceServiceOptions
           cwd,
           env,
           ...(nativeSessionId ? { nativeSessionId } : {}),
-          ...(sessionRuntime.binding.model ? { model: sessionRuntime.binding.model } : {}),
-          ...(sessionRuntime.binding.reasoningEffort ? { reasoningEffort: sessionRuntime.binding.reasoningEffort } : {}),
+          ...(sessionRuntimeProjection?.webConfigPin
+            ? { configPin: sessionRuntimeProjection.webConfigPin }
+            : {
+                ...(sessionRuntime.binding.model ? { model: sessionRuntime.binding.model } : {}),
+                ...(sessionRuntime.binding.reasoningEffort ? { reasoningEffort: sessionRuntime.binding.reasoningEffort } : {}),
+              }),
           ...(opts.agentMode ? { agentMode: opts.agentMode } : {}),
         }, completion => { completed = completion; });
         await report(snapshot.phase);

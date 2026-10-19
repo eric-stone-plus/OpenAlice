@@ -30,7 +30,14 @@ tags = ["credential", "openalice"]
 [allowlist]
 description = "Synthetic fixtures and placeholder env files"
 paths = [
+  # Generated packaging output (gitignored): app.asar bundles dependencies
+  # whose minified fixtures match entropy rules. Source files are still
+  # scanned; regenerate the package before scanning it as an artifact.
+  '''(^|/)dist/''',
   '''(^|/)\.env\.(?:example|sample|template)$''',
+  # Vendored xterm patches contain minified data that matches the
+  # generic-api-key entropy heuristic but is not a credential.
+  '''(^|/)patches/@xterm__.*\.patch$''',
 ]
 regexes = [
   '''OPENALICE_FIXTURE_[A-Za-z0-9_]+''',
@@ -66,4 +73,10 @@ regexes = [
   '''synthetic-broker-transfer-key''',
   '''synthetic-broker-transfer-secret''',
   '''super-secret-password-value''',
+  # Synthetic values in redaction and broker-preset specs. Exact matches only;
+  # the files themselves stay in scope for real credentials.
+  '''MIIEvQIBADANBgkqhkiG9w0BAQEFAASC''',
+  '''live-api-key-1234''',
+  '''live-secret-5678''',
+  '''0xnotvalidkey''',
 ]

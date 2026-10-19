@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { installBrokerPack, planBrokerPack, getBrokerPackLocalStatus } from './installer.js'
 import { isUTADisabled, resolveUTAUrl } from '../uta-supervisor/url.js'
 import { triggerUTARestart } from '../uta-supervisor/restart-trigger.js'
+import { localAuthHeaders } from '../../server/local-auth.js'
 
 export async function planBrokerPackUpdate(engine: InstallableBrokerEngine): Promise<UpdatePlan> {
   const [asset, installed] = await Promise.all([planBrokerPack(engine), getBrokerPackLocalStatus(engine)])
@@ -24,7 +25,10 @@ export async function applyBrokerPackUpdate(engine: InstallableBrokerEngine, app
   const loaded = async (version: string, contentId: string): Promise<boolean> => {
     if (isUTADisabled()) return false
     try {
-      const response = await fetch(`${resolveUTAUrl()}/__uta/broker-packs/${engine}`, { signal: AbortSignal.timeout(5000) })
+      const response = await fetch(`${resolveUTAUrl()}/__uta/broker-packs/${engine}`, {
+        signal: AbortSignal.timeout(5000),
+        headers: await localAuthHeaders(),
+      })
       const body = await response.json() as { identity?: { version: string; contentId: string } }
       return response.ok && body.identity?.version === version && body.identity.contentId === contentId
     } catch { return false }

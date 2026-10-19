@@ -140,6 +140,7 @@ describe('CLI installer dev publication workflow', () => {
       'packages/guardian-runtime/dist',
       'packages/ibkr/dist',
       'packages/opentypebb/dist',
+      'packages/sealing-key/dist',
       'packages/uta-protocol/dist',
       'packages/update-lifecycle/dist',
     ])

@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@traderalice/guardian-runtime": "workspace:*",
+    "@traderalice/sealing-key": "workspace:*",
     "electron": "^39.8.5",
     "electron-builder": "^26.0.0",
     "electron-builder-squirrel-windows": "^26.0.0",

@@ -13,6 +13,7 @@ import {
 } from '@traderalice/uta-protocol'
 import { triggerUTARestart } from '../../services/uta-supervisor/restart-trigger.js'
 import { resolveUTAUrl } from '../../services/uta-supervisor/url.js'
+import { resolveLocalToken } from '../../server/local-auth.js'
 import { describeTradingMode } from '../../services/trading-mode.js'
 import {
   INSTALLABLE_BROKER_ENGINES,
@@ -349,11 +350,20 @@ export function createTradingConfigRoutes(ctx: EngineContext) {
     const utaUrl = resolveUTAUrl()
     try {
       const body = await c.req.json()
+      const token = await resolveLocalToken()
       const res = await fetch(`${utaUrl.replace(/\/$/, '')}/api/trading/test-connection`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${token}`,
+        },
         body: JSON.stringify(body),
       })
+      if (res.status === 401 || res.status === 403) {
+        // Check before parsing: a proxy or UTA may return an empty/text auth
+        // rejection body, and res.json() would turn it into a misleading 503.
+        return c.json({ success: false, error: 'The local service token was rejected by UTA.' }, 502)
+      }
       const data = await res.json()
       return c.json(data, res.status as 200 | 400 | 500)
     } catch (err) {

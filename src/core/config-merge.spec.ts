@@ -9,21 +9,26 @@ import { join } from 'node:path'
  */
 let home: string
 let savedHome: string | undefined
+let savedBackend: string | undefined
 
 async function loadConfig() {
   vi.resetModules()
   process.env['OPENALICE_HOME'] = home
+  process.env['OPENALICE_SEALING_BACKEND'] = 'file'
   return import('./config.js')
 }
 
 beforeEach(async () => {
   savedHome = process.env['OPENALICE_HOME']
+  savedBackend = process.env['OPENALICE_SEALING_BACKEND']
   home = await mkdtemp(join(tmpdir(), 'oa-config-merge-'))
 })
 
 afterEach(async () => {
   if (savedHome === undefined) delete process.env['OPENALICE_HOME']
   else process.env['OPENALICE_HOME'] = savedHome
+  if (savedBackend === undefined) delete process.env['OPENALICE_SEALING_BACKEND']
+  else process.env['OPENALICE_SEALING_BACKEND'] = savedBackend
   vi.resetModules()
   await rm(home, { recursive: true, force: true })
 })

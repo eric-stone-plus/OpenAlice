@@ -16,6 +16,7 @@ import type { BarServiceDeps } from '../../../src/domain/market-data/bars/types.
 import { createMarketBarsTools } from '../../../src/tool/market-bars.js'
 import { createBarsRoutes } from '../../../src/webui/routes/bars.js'
 import { registerProjectCliRoutes } from '../../../src/server/project-cli.js'
+import { ensureLocalToken } from '../../../src/server/local-auth.js'
 
 const exec = promisify(execFile)
 const executable = process.env['OPENALICE_CLI_ACCEPTANCE_EXECUTABLE'] ?? process.execPath
@@ -34,12 +35,14 @@ it('public Project CLI exports the same bars as the chart, clears inherited Work
   const center = new ToolCenter()
   center.register(createMarketBarsTools({ barService }), 'bars')
   const app = new Hono()
+  const localToken = await ensureLocalToken(home)
   const headers: Array<{ session?: string; path: string }> = []
   app.use('*', async (c, next) => { headers.push({ path: c.req.path, session: c.req.header('x-openalice-session') }); await next() })
   registerProjectCliRoutes(app, center, identity)
   registerCliRoutes(app, {
     toolCenter: center, workspaceToolCenter: new WorkspaceToolCenter(), inboxStore: {} as never, entityStore: {} as never,
     getWorkspaceService: () => ({ registry: { get: (id: string) => id === 'local-ws' ? { id, tag: 'Local', dir: home } : undefined } }) as never,
+    localToken,
   })
   app.route('/api/bars', createBarsRoutes({ barService } as never))
   const server = serve({ fetch: app.fetch, hostname: '127.0.0.1', port: 0 })

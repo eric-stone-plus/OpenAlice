@@ -6,9 +6,22 @@ import { runMigrations } from '../migrations/runner.js'
 import { dataPath } from '@/core/paths.js'
 import { withConfigBootstrapLock } from './config-bootstrap-lock.js'
 import { parseDuration } from './duration.js'
-import { isSealedEnvelope, seal, unseal } from './sealing.js'
+import {
+  hasSealedMarker,
+  seal,
+  unseal,
+  SealingBackendUnavailableError,
+  SealingKeyConflictError,
+  SealingKeyMissingError,
+} from './sealing.js'
 import { globalProviderKeysFile, isSecretConfigFile } from './secret-files.js'
 import { preserveSecretFields } from './redaction.js'
+
+function isSealingStoreError(error: unknown): boolean {
+  return error instanceof SealingKeyMissingError
+    || error instanceof SealingBackendUnavailableError
+    || error instanceof SealingKeyConflictError
+}
 
 const CONFIG_DIR = dataPath('config')
 
@@ -38,10 +51,11 @@ async function readSecretFileAt(path: string): Promise<unknown | undefined> {
     }
     throw err
   }
-  if (!isSealedEnvelope(raw)) return raw
+  if (!hasSealedMarker(raw)) return raw
   try {
     return await unseal(raw)
   } catch (err) {
+    if (isSealingStoreError(err)) throw err
     const quarantine = `${path}.sealed-unreadable-${Date.now()}`
     await rename(path, quarantine).catch(() => { /* best effort */ })
     console.error(
@@ -71,7 +85,7 @@ async function readSecretFileAtStrict(path: string): Promise<unknown | undefined
       `${path} is unreadable; refusing to overwrite it: ${err instanceof Error ? err.message : String(err)}`,
     )
   }
-  if (!isSealedEnvelope(raw)) return raw
+  if (!hasSealedMarker(raw)) return raw
   try {
     return await unseal(raw)
   } catch (err) {
@@ -812,10 +826,11 @@ export async function readUTAsConfig(): Promise<UTAConfig[]> {
   // Sealed envelope — the normal at-rest shape. A plain array remains readable
   // for manual recovery, but the 0.89.2-beta baseline no longer runs a legacy
   // boot migration; the next explicit account save writes the sealed shape.
-  if (isSealedEnvelope(raw)) {
+  if (hasSealedMarker(raw)) {
     try {
       raw = await unseal(raw)
     } catch (err) {
+      if (isSealingStoreError(err)) throw err
       // Recoverable, loudly: quarantine the unreadable file (never delete —
       // it's the user's broker config, the key may resurface) and continue
       // with an empty store so the app still boots.

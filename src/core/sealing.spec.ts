@@ -12,21 +12,26 @@ import { join } from 'node:path'
  */
 let home: string
 let savedHome: string | undefined
+let savedBackend: string | undefined
 
 async function loadSealing() {
   vi.resetModules()
   process.env['OPENALICE_HOME'] = home
+  process.env['OPENALICE_SEALING_BACKEND'] = 'file'
   return await import('./sealing.js')
 }
 
 beforeEach(async () => {
   savedHome = process.env['OPENALICE_HOME']
+  savedBackend = process.env['OPENALICE_SEALING_BACKEND']
   home = await mkdtemp(join(tmpdir(), 'oa-sealing-'))
 })
 
 afterEach(async () => {
   if (savedHome === undefined) delete process.env['OPENALICE_HOME']
   else process.env['OPENALICE_HOME'] = savedHome
+  if (savedBackend === undefined) delete process.env['OPENALICE_SEALING_BACKEND']
+  else process.env['OPENALICE_SEALING_BACKEND'] = savedBackend
   vi.resetModules()
   await rm(home, { recursive: true, force: true })
 })
@@ -92,11 +97,12 @@ describe('seal / unseal', () => {
     await expect(unseal(envelope)).rejects.toThrow(/does not authenticate/)
   })
 
-  it('throws UnsealError on a malformed key file', async () => {
-    const { seal, unseal, sealingKeyPath, UnsealError } = await loadSealing()
+  it('throws a key-store error on a malformed key file', async () => {
+    const { seal, unseal, sealingKeyPath, SealingBackendUnavailableError } = await loadSealing()
     const envelope = await seal({ x: 1 })
     await writeFile(sealingKeyPath(), 'bm90LWEta2V5\n') // base64("not-a-key") — wrong length
-    await expect(unseal(envelope)).rejects.toBeInstanceOf(UnsealError)
+    await expect(unseal(envelope)).rejects.toBeInstanceOf(SealingBackendUnavailableError)
+    await expect(unseal(envelope)).rejects.toThrow(/malformed/)
   })
 })
 

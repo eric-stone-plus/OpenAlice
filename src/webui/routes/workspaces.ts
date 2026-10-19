@@ -61,7 +61,7 @@ import {
   type ResolvedSessionRuntimeBinding,
   type WorkspaceAiCred,
 } from '../../workspaces/cli-adapter.js';
-import { addCredential, readCredentials, readWorkspaceDefaultAgent, setCredentialLastModel, credentialWires, credentialWireShapeEnum, type Credential } from '../../core/config.js';
+import { readCredentials, readWorkspaceDefaultAgent, setCredentialLastModel, credentialWires, type Credential } from '../../core/config.js';
 import { inferCredentialVendor, resolveAnthropicAuthMode } from '../../core/credential-inference.js';
 import {
   applyRegisteredModelSemantics,
@@ -2622,6 +2622,14 @@ export function createWorkspaceRoutes(
         ...(parsed.data.reasoningEffort ? { reasoningEffort: parsed.data.reasoningEffort } : {}),
       };
     }
+    if (runtimeSelection
+      && adapter.capabilities.aiProvider?.nativeOnly
+      && (runtimeSelection.model !== undefined || runtimeSelection.reasoningEffort !== undefined)) {
+      return c.json({
+        error: 'native_only',
+        message: 'This runtime is native-only; its model and effort are pinned by OpenAlice.',
+      }, 400);
+    }
     try {
       await prepareAgentRuntimeWorkspace(adapter, {
         wsId: id,
@@ -3200,38 +3208,9 @@ export function createWorkspaceRoutes(
     }
   });
 
-  app.post('/credentials', async (c) => {
-    const body = (await safeJson(c)) as
-      | { apiKey?: string; baseUrl?: string; agent?: string; vendor?: string; label?: string; wireShape?: string }
-      | null;
-    const apiKey = body?.apiKey?.trim();
-    if (!apiKey) return c.json({ error: 'apiKey_required' }, 400);
-    const baseUrl = body?.baseUrl?.trim() || undefined;
-    const label = body?.label?.trim();
-    const wireParse = credentialWireShapeEnum.safeParse(body?.wireShape);
-    // The workspace modal saves a single hand-entered shape; capture it as a
-    // one-entry wires map (the vault can later add more shapes for the same key —
-    // dedup-by-key upgrades in place). Subscriptions never flow through here.
-    const cred: Credential = {
-      vendor: inferCredentialVendor({
-        agent: body?.agent,
-        baseUrl,
-        ...(wireParse.success ? { wireShape: wireParse.data } : {}),
-      }),
-      ...(label ? { label } : {}),
-      authType: 'api-key',
-      apiKey,
-      ...(wireParse.success ? { wires: { [wireParse.data]: baseUrl ?? '' } } : (baseUrl ? { wires: {} } : {})),
-    };
-    try {
-      const slug = await addCredential(cred);
-      launcherLogger.info('credentials.saved', { slug, vendor: cred.vendor });
-      return c.json({ slug, vendor: cred.vendor }, 201);
-    } catch (err) {
-      launcherLogger.warn('credentials.write_failed', { err });
-      return c.json({ error: 'credentials_write_failed', message: (err as Error).message }, 500);
-    }
-  });
+  // Legacy workspace-scoped credential write route. Removed: the canonical
+  // store is `/api/config/credentials`; the native-only desktop must not grow
+  // a second vault write surface.
 
   // Deprecated compatibility export API. Managed Sessions do not consult
   // these native project files for fresh launch defaults.

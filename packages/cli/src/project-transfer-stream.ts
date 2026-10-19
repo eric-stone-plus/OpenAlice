@@ -411,6 +411,8 @@ async function assertPublishedEntrySet(destination: string, plan: ProjectTransfe
   if (plan.policy.credentials === 'include') {
     for (const path of [
       'sealing.key',
+      'state/sealing.key.cred',
+      'state/sealing.key.fp',
       'provider-keys.json',
       'data/config/ai-provider-manager.json',
       'data/config/accounts.json',

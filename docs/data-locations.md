@@ -15,10 +15,12 @@ parts together:
 <OPENALICE_HOME>/
 ├── data/                 product configuration and portable user data
 ├── workspaces/           Workspace repositories, Sessions, and task state
-├── state/                Guardian and runtime ownership locks
+├── state/                ownership locks, state/sealing.key.cred,
+│                         and the non-secret state/sealing.key.fp verifier
+├── auth/                 local bearer token (0600, never portable)
 ├── runtime/              optional Broker Packs
 ├── provider-keys.json    AI provider credentials, unless globally overridden
-└── sealing.key           machine-bound encryption key
+└── sealing.key           legacy plaintext fallback (migrated to state/sealing.key.cred)
 ```
 
 Two AliceProjects may run concurrently when they use different complete
@@ -216,7 +218,8 @@ A received AliceProject is registered in the Supervisor's `config.json`, not
 `machines.json`, only after
 its sibling staging Home has passed checksum and space validation and has been
 atomically published. Registration does not select it as the remote default.
-The new Home owns a new `sealing.key`; source machine locks, Runtime payloads,
+The new Home owns its own sealing key (Linux: `state/sealing.key.cred`, bound to the
+user and machine); source machine locks, Runtime payloads,
 installer state, and sealing material never travel with it.
 
 `OPENALICE_PROJECT`, `OPENALICE_HOME`, `--project`, and `--home` remain
@@ -243,7 +246,7 @@ complete-home ownership remains with the selected AliceProject.
 `openalice project copy-ai-creds` is the explicit exception for AI credential
 rows in `<home>/data/config/ai-provider-manager.json`. It merges only the
 `credentials` map into the destination home, never prints secrets, and does not
-copy Workspace launch preferences, broker accounts, `sealing.key`, or
+copy Workspace launch preferences, broker accounts, sealing-key material, or
 `provider-keys.json`.
 
 The following cases fail visibly before another backend starts:

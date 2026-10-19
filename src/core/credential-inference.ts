@@ -2,8 +2,9 @@
  * Credential inference helpers for the workspace "save to Alice" path.
  *
  * Given a CLI agent + the entered baseUrl, infer the credential vendor and the
- * Anthropic auth-header mode. Used by the workspace AI-config modal's save-back
- * route (`/api/workspaces/credentials`) and the credential probe.
+ * Anthropic auth-header mode. Used by the workspace AI-config modal's
+ * save-back path (canonical `/api/config/credentials`) and the credential
+ * probe.
  *
  * (The profile-shaped inference that fed the 0002/0003 migrations — inferVendor /
  * inferAuthType / hasExtractableCredential / profileToCredential — went with

@@ -2,9 +2,9 @@
  * BFF proxy for `/api/trading/*` — Alice → UTA.
  *
  * UI talks to Alice on a single origin (decision #2 of UTA-split v1); this
- * route forwards every trading request unchanged to the UTA service. v1
- * has no auth between the two — UTA is bound to 127.0.0.1 only, so the
- * trust boundary is the host, not the request.
+ * route forwards every trading request unchanged to the UTA service. Both
+ * sides are loopback, and the forwarded request carries the local bearer
+ * token shared with UTA; the browser never sees that token.
  *
  * Stream-friendly: forwards request body, returns UTA's Response as-is so
  * `Content-Type` / chunked transfer / SSE headers pass through. A short
@@ -16,6 +16,7 @@ import { Hono } from 'hono'
 import { probeOptionalCarrier } from '../../services/optional-carrier/health.js'
 import { describeTradingMode, type TradingModePolicy } from '../../services/trading-mode.js'
 import { decodeUTAHealth } from '../../services/uta-supervisor/health.js'
+import { resolveLocalToken } from '../../server/local-auth.js'
 
 // Total request timeout. UTA is on the loopback interface so connect is
 // instant — this guards against handlers that legitimately take seconds
@@ -146,6 +147,8 @@ export function createTradingProxyRoutes(opts: {
       const v = incoming.headers.get(name)
       if (v !== null) forwardHeaders.set(name, v)
     }
+    const token = await resolveLocalToken()
+    forwardHeaders.set('authorization', `Bearer ${token}`)
 
     const controller = new AbortController()
     const connectTimer = setTimeout(() => controller.abort(), PROXY_TIMEOUT_MS)
@@ -174,6 +177,16 @@ export function createTradingProxyRoutes(opts: {
       clearTimeout(connectTimer)
     }
 
+    if (upstream.status === 401 || upstream.status === 403) {
+      // The browser's Alice session is already authenticated by the web
+      // middleware. A UTA 401 here means the server-to-server local token is
+      // stale or missing; do not forward it as if the user's session expired.
+      return c.json({
+        error: 'UTA authentication failed',
+        detail: 'The local service token was rejected by UTA.',
+        hint: 'Restart OpenAlice so Alice and UTA provision the same local token.',
+      }, 502)
+    }
     // Re-wrap with a fresh Headers object so downstream middleware (CORS,
     // etc.) can still mutate them. `fetch()` returns a Response whose
     // headers carry an immutable guard per the WHATWG spec — handing it

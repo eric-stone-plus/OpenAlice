@@ -89,7 +89,7 @@ describe('configureAutoUpdate', () => {
     const getStatus = mocks.handlers.get('openalice:updater:get-status')
     const openRelease = mocks.handlers.get('openalice:updater:open-release')
     expect(await getStatus?.()).toBeNull()
-    await expect(controls.discover()).resolves.toMatchObject({ status: 'unsupported', message: 'not-packaged', currentVersion: '0.94.1-beta.2', channel: 'dev' })
+    await expect(controls.discover()).resolves.toMatchObject({ status: 'unsupported', message: 'Updates are disabled in development builds.', currentVersion: '0.94.1-beta.2', channel: 'dev' })
     await expect(controls.install()).rejects.toThrow('No downloaded update is ready to install.')
     await openRelease?.({}, undefined)
     expect(mocks.shell.openExternal)

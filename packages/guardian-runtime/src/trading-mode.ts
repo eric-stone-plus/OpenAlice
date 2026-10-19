@@ -1,6 +1,6 @@
-import { createDecipheriv } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
+import { hasSealedMarker, unsealAt } from '@traderalice/sealing-key'
 
 export type GuardianTradingMode = 'lite' | 'readonly' | 'pro'
 
@@ -27,7 +27,7 @@ export async function resolveGuardianTradingMode(
 ): Promise<GuardianTradingModePlan> {
   const envMode = parseGuardianTradingModeEnv(env)
   const configuredMode = await readPersistedTradingMode(userDataHome)
-  const hasUTAConfig = await hasPersistedUTAs(userDataHome)
+  const hasUTAConfig = await hasPersistedUTAs(userDataHome, env)
   if (envMode) return { mode: envMode, source: 'env', envLocked: true, hasUTAConfig }
   if (configuredMode) return { mode: configuredMode, source: 'config', envLocked: false, hasUTAConfig }
   return { mode: hasUTAConfig ? 'pro' : 'lite', source: 'auto', envLocked: false, hasUTAConfig }
@@ -42,12 +42,15 @@ async function readPersistedTradingMode(userDataHome: string): Promise<GuardianT
       'trading.json',
     ), 'utf8')) as { mode?: unknown }
     return raw.mode === 'lite' || raw.mode === 'readonly' || raw.mode === 'pro' ? raw.mode : null
-  } catch {
+  } catch (error: unknown) {
+    if (!isNodeError(error, 'ENOENT')) {
+      console.warn(`[guardian] could not read trading.json: ${errorMessage(error)}`)
+    }
     return null
   }
 }
 
-async function hasPersistedUTAs(userDataHome: string): Promise<boolean> {
+async function hasPersistedUTAs(userDataHome: string, env: NodeJS.ProcessEnv): Promise<boolean> {
   try {
     const raw = JSON.parse(await readFile(resolve(
       userDataHome,
@@ -55,44 +58,24 @@ async function hasPersistedUTAs(userDataHome: string): Promise<boolean> {
       'config',
       'accounts.json',
     ), 'utf8'))
-    const accounts = isSealedEnvelope(raw)
-      ? await unsealGuardianAccounts(userDataHome, raw)
+    const accounts = hasSealedMarker(raw)
+      ? await unsealAt(userDataHome, raw, env)
       : raw
     return Array.isArray(accounts) && accounts.length > 0
-  } catch {
+  } catch (error: unknown) {
+    if (!isNodeError(error, 'ENOENT')) {
+      console.warn(`[guardian] could not read accounts.json; treating UTA config as absent: ${errorMessage(error)}`)
+    }
     return false
   }
 }
 
-function isSealedEnvelope(value: unknown): value is {
-  alg: string
-  iv: string
-  tag: string
-  data: string
-} {
-  return (
-    typeof value === 'object' && value !== null &&
-    (value as Record<string, unknown>)['$sealed'] === 1 &&
-    typeof (value as Record<string, unknown>)['iv'] === 'string' &&
-    typeof (value as Record<string, unknown>)['tag'] === 'string' &&
-    typeof (value as Record<string, unknown>)['data'] === 'string'
-  )
+function isNodeError(error: unknown, code: string): error is NodeJS.ErrnoException {
+  return error instanceof Error && 'code' in error && error.code === code
 }
 
-async function unsealGuardianAccounts(
-  userDataHome: string,
-  envelope: { alg: string; iv: string; tag: string; data: string },
-): Promise<unknown> {
-  if (envelope.alg !== 'aes-256-gcm') return []
-  const keyRaw = (await readFile(resolve(userDataHome, 'sealing.key'), 'utf8')).trim()
-  const key = Buffer.from(keyRaw, 'base64')
-  const decipher = createDecipheriv('aes-256-gcm', key, Buffer.from(envelope.iv, 'base64'))
-  decipher.setAuthTag(Buffer.from(envelope.tag, 'base64'))
-  const plaintext = Buffer.concat([
-    decipher.update(Buffer.from(envelope.data, 'base64')),
-    decipher.final(),
-  ])
-  return JSON.parse(plaintext.toString('utf8')) as unknown
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
 }
 
 function truthyEnv(raw: string | undefined): boolean {

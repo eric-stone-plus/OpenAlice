@@ -14,6 +14,7 @@
 import type { WireShape } from '../ai-providers/preset-catalog.js';
 import type { ModelReasoningEffort } from '../ai-providers/model-semantics.js';
 import type { HeadlessOutputEvent } from './headless-output.js';
+import type { WebConfigPin } from './web-session/transport.js';
 
 export interface OnDiskSession {
   readonly sessionId: string;
@@ -238,6 +239,9 @@ export interface AgentSessionRuntimeProjection {
   readonly interactiveArgs: readonly string[]
   readonly headlessArgs: readonly string[]
   readonly webArgs?: readonly string[]
+  /** App-owned invariants the ACP transport must apply after session/new and
+   *  reject when a caller tries to change them. */
+  readonly webConfigPin?: WebConfigPin
 }
 
 export interface AgentSessionRuntimeAdapter {

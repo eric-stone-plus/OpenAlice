@@ -8,6 +8,12 @@ import {
   type WebSessionWire,
 } from './model.js'
 
+export interface WebConfigPin {
+  readonly model?: string
+  readonly reasoningEffort?: string
+  readonly mode?: string
+}
+
 export interface StartWebSessionInput {
   readonly onActivity?: (phase: string) => void
   readonly recordId: string
@@ -31,6 +37,9 @@ export interface StartWebSessionInput {
    * Applied after session/new or session/load and before the first prompt.
    */
   readonly agentMode?: string
+  /** App-owned model/effort/mode invariant. The transport applies it after
+   *  session/new or session/load and rejects later changes. */
+  readonly configPin?: WebConfigPin
 }
 
 /**

@@ -116,6 +116,7 @@
     "@traderalice/update-lifecycle": "workspace:*",
     "yaml": "^2.9.0",
     "zod": "^4.3.6",
-    "@traderalice/guardian-runtime": "workspace:*"
+    "@traderalice/guardian-runtime": "workspace:*",
+    "@traderalice/sealing-key": "workspace:*"
   }
 }

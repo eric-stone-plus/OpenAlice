@@ -11,10 +11,12 @@ import { registerProjectCliRoutes } from './project-cli.js'
  * the exact dispatch chain the MCP server uses (`extractMcpShape` +
  * `wrapToolExecute`), so the CLIs and MCP stay front-ends over one registry.
  *
- * Mounted on the MCP server's Hono app (open posture, no admin-token gate — the
- * workspace CLI carries no secret). Identity rides the URL path (`:wsId`), like
- * `/mcp/:wsId`. The `:export` segment selects a CliExport (data / workspace /
- * …) — the binary maps to its public export (`alice` and its legacy alias use `data`).
+ * Mounted on the MCP server's Hono app. Every request carries the local bearer
+ * token provisioned at `~/.openalice/auth/local.token`; identity additionally
+ * rides the URL path (`:wsId`), like `/mcp/:wsId`. The token is not a same-UID
+ * boundary, but it removes the unauthenticated local surface. The `:export`
+ * segment selects a CliExport (data / workspace / …) — the binary maps to its
+ * public export (`alice` and its legacy alias use `data`).
  *
  *   GET  /cli/:wsId/:export/manifest   grouped command tree + per-verb JSON
  *                                      schema (powers `--help`), plus the
@@ -42,6 +44,7 @@ import { sessionOriginFromInboxOrigin } from '../core/provenance-store.js'
 import type { WorkspaceService } from '../workspaces/service.js'
 import { logger as launcherLogger } from '../workspaces/logger.js'
 import { extractMcpShape, wrapToolExecute } from '../core/mcp-export.js'
+import { localAuthMiddleware } from './local-auth.js'
 import {
   type CliExport,
   toolRegistryScope,
@@ -61,13 +64,27 @@ export interface CliGatewayDeps {
   entityStore: IEntityStore
   /** Lazy — WorkspaceService is created after McpPlugin starts. */
   getWorkspaceService: () => WorkspaceService | null
+  /** Bearer token for local workspace clients. When set, every `/cli` request
+   *  must carry it. The manifest-only web mount is behind the admin-token
+   *  middleware instead and passes no token. */
+  localToken?: string
 }
 
 type WsMeta = { id: string; tag: string; dir?: string }
 
 /** Mount /cli/:wsId/:export/* onto an existing Hono app (the MCP server's app). */
 export function registerCliRoutes(app: Hono, deps: CliGatewayDeps, manifestOnly = false): void {
-  const { toolCenter, workspaceToolCenter, inboxStore, entityStore, getWorkspaceService } = deps
+  const { toolCenter, workspaceToolCenter, inboxStore, entityStore, getWorkspaceService, localToken } = deps
+  if (!manifestOnly) {
+    // A caller that mounts the trading-capable surface must supply the token.
+    // Falling back to the process env keeps the CLI shim and tests on one
+    // provisioning path, while an omitted token fails closed.
+    const token = localToken ?? process.env['OPENALICE_LOCAL_TOKEN']?.trim()
+    if (!token) {
+      throw new Error('registerCliRoutes requires a local auth token when manifestOnly is false')
+    }
+    app.use('/cli/*', localAuthMiddleware(token))
+  }
   // The workspace CLIs are local argv forwarders and send no Origin. A browser
   // page always does, including a cross-origin `text/plain` POST that skips
   // preflight; reject it before dispatch. This is the CSRF boundary for the

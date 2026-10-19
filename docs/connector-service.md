@@ -256,7 +256,7 @@ suppresses both text and files before reading any file.
 `data/config/connector-service.json` contains only `{ "enabled": boolean }` so
 Guardian can decide whether to run the process without decrypting platform
 credentials. `data/config/connectors.json` is an AES-256-GCM sealed envelope;
-the machine key remains at `<OPENALICE_HOME>/sealing.key` outside portable
+the machine key remains at `<OPENALICE_HOME>/state/sealing.key.cred` (Linux) outside portable
 `data/`.
 
 ### Network proxy

@@ -491,6 +491,10 @@ function exclusionReason(path: string): ProjectTransferExclusion['reason'] | nul
   const gitLocalState = gitLocalStateReason(path)
   if (gitLocalState) return gitLocalState
   if (parts[0] === 'bin' || parts[0] === 'cli') return 'machine-local'
+  // The local bearer token is per-home and per-process; it must never travel
+  // with a project transfer. A copied token would authenticate the source
+  // machine, and the destination provisions its own on first boot.
+  if (parts[0] === 'auth') return 'machine-local'
   if (parts[0] === 'state' || parts[0] === 'runtime' || parts[0] === 'logs') return 'runtime-state'
   if (parts[0] === 'data' && parts[1] === 'logs') return 'runtime-state'
   if (parts[0] === 'data' && ['sessions', 'tool-calls'].includes(parts[1] ?? '')) return 'session-plane'

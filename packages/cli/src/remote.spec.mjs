@@ -1193,6 +1193,7 @@ describe('OpenAlice managed remote connector', () => {
     const probe = buildRemoteArtifactsProbeCommand("/srv/Alice's source")
     expect(probe).toContain("root='/srv/Alice'\\''s source'")
     expect(probe).toContain('test -f "$root/dist/main.js"')
+    expect(probe).toContain('test -f "$root/packages/sealing-key/dist/index.js"')
     expect(buildRemoteCheckoutProbeCommand("/srv/Alice's source"))
       .toContain("root='/srv/Alice'\\''s source'")
     expect(buildRemoteBuildToolsProbeCommand()).toContain("printf 'cxx\\n'")

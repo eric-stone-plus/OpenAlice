@@ -20,6 +20,7 @@ export const CLI_NEUTRAL_INPUT_ROOTS = Object.freeze([
   'packages/guardian-runtime/dist',
   'packages/ibkr/dist',
   'packages/opentypebb/dist',
+  'packages/sealing-key/dist',
   'packages/uta-protocol/dist',
   'packages/update-lifecycle/dist',
 ])

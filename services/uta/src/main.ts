@@ -35,6 +35,7 @@ import { startOrderSyncPoller } from './domain/trading/order-sync-poller.js'
 import { buildKeylessDataUTAs } from './domain/trading/keyless-data-sources.js'
 import { createTradingRoutes } from './http/routes-trading.js'
 import { createSimulatorRoutes } from './http/routes-simulator.js'
+import { ensureLocalToken, hasValidLocalToken } from '@/server/local-auth.js'
 import type { UTAEngineContext } from './types.js'
 
 const UTA_PORT = Number(process.env['OPENALICE_UTA_PORT'] ?? 47333)
@@ -145,9 +146,19 @@ export async function startUTAService(): Promise<void> {
   // ==================== HTTP app ====================
 
   const app = new Hono()
-  // UTA has no token gate; its security model is loopback-only. A browser
-  // page is not a local process in that model: it always sends Origin, so
-  // reject it before a simple cross-origin order POST can reach the routes.
+  const localToken = await ensureLocalToken()
+  // Health stays unauthenticated: Guardian and Alice poll it before any
+  // request context exists. Every trading/simulator/broker-pack route requires
+  // the local bearer token shared with Alice's UTA client.
+  app.use('*', async (c, next) => {
+    if (c.req.path === '/__uta/health') return next()
+    if (!hasValidLocalToken(c, localToken)) {
+      return c.json({ error: 'unauthorized', message: 'local authentication required' }, 401)
+    }
+    await next()
+  })
+  // UTA has no browser session; reject any Origin before a simple cross-origin
+  // order POST can reach the routes.
   app.use('*', async (c, next) => {
     if (c.req.header('origin')) return c.json({ error: 'origin_not_allowed' }, 403)
     await next()

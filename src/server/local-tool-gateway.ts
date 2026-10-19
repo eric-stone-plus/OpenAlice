@@ -5,8 +5,8 @@
  * plain shell commands inside a workspace. They need a local argv->tool bridge,
  * but they do not need the MCP protocol. Keeping this gateway separate lets
  * Electron/dev reuse the web listener for `/cli` while Docker/public-web
- * topologies can keep an unauthenticated CLI surface on a private loopback
- * port.
+ * topologies keep a private loopback port. The gateway requires the local
+ * bearer token; loopback alone is not authentication.
  */
 
 import { Hono } from 'hono'
@@ -25,6 +25,8 @@ export interface LocalToolGatewayDeps {
   readonly inboxStore: IInboxStore
   readonly entityStore: IEntityStore
   readonly getWorkspaceService: () => WorkspaceService | null
+  /** Local bearer token; every `/cli` request must carry it. */
+  readonly localToken: string
 }
 
 export function mountLocalToolGateway(app: Hono, deps: LocalToolGatewayDeps): void {

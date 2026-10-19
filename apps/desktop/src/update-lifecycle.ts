@@ -2,8 +2,9 @@ import { join } from 'node:path'
 import { createUpdatePlan, verifyReleaseEvidence, type UpdateOwner, type UpdateOperation } from '@traderalice/update-lifecycle'
 import { FileUpdateJournal } from '@traderalice/update-lifecycle/node'
 
-/** Lives in userData, independently of the backend being replaced. Native
- * signature/checksum validation remains electron-updater's responsibility. */
+/** Lives in userData, independently of the backend being replaced. Linux
+ *  native auto-update is gated on a signed manifest; see update-manifest.ts
+ *  and update-signing-keys.ts. */
 export class DesktopUpdateLifecycle {
   readonly journal: FileUpdateJournal
   constructor(root: string, private readonly currentVersion: () => string) {

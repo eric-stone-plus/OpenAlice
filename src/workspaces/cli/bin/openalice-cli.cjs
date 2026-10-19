@@ -178,8 +178,25 @@ async function invoke(base, tool, args) {
     .join('\n')
 }
 
+function isLocalToolUrl(url) {
+  if (url.startsWith('/')) return true
+  try {
+    const parsed = new URL(url)
+    return parsed.protocol === 'http:' && ['127.0.0.1', '[::1]', 'localhost'].includes(parsed.hostname)
+  } catch {
+    return false
+  }
+}
+
 async function fetchJson(url, opts) {
-  opts = { ...opts, headers: { ...opts.headers, ...(process.env.OPENALICE_PROJECT_ID ? { 'x-openalice-project': process.env.OPENALICE_PROJECT_ID } : {}) } }
+  const token = await resolveLocalToken()
+  const headers = { ...opts.headers }
+  const hasAuthorization = Object.keys(headers).some((key) => key.toLowerCase() === 'authorization')
+  if (process.env.OPENALICE_PROJECT_ID) headers['x-openalice-project'] = process.env.OPENALICE_PROJECT_ID
+  // Never send the machine token to a non-loopback URL: OPENALICE_TOOL_URL is
+  // inherited by agent tool calls and may point at a remote relay.
+  if (token && !hasAuthorization && isLocalToolUrl(url)) headers.authorization = `Bearer ${token}`
+  opts = { ...opts, headers }
   if (process.env.OPENALICE_TOOL_SOCKET && url.startsWith('/')) {
     return fetchSocketJson(process.env.OPENALICE_TOOL_SOCKET, url, opts)
   }
@@ -197,6 +214,20 @@ async function fetchJson(url, opts) {
     body = text
   }
   return { ok: resp.ok, status: resp.status, body }
+}
+
+async function resolveLocalToken() {
+  const inline = process.env.OPENALICE_LOCAL_TOKEN
+  if (inline) return inline
+  const file = process.env.OPENALICE_LOCAL_TOKEN_FILE
+  if (!file) return ''
+  try {
+    const fs = await import('node:fs/promises')
+    return (await fs.readFile(file, 'utf8')).trim()
+  } catch (e) {
+    debug('local_token.read_failed', { file, code: e && e.code, message: e && e.message })
+    return ''
+  }
 }
 
 async function fetchSocketJson(socketPath, path, opts) {

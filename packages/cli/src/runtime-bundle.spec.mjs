@@ -136,6 +136,7 @@ async function createFixture() {
     'src/workspaces/cli/bin/pi-session-provider.ts': 'export default function () {}\n',
     'services/uta/dist/uta.js': 'uta\n',
     'services/connector/dist/connector.cjs': 'connector\n',
+    'packages/sealing-key/dist/index.js': 'sealing key\n',
     'packages/guardian-runtime/dist/index.js': 'guardian runtime\n',
     'scripts/guardian/prod.mjs': 'guardian\n',
     'scripts/guardian/control-server.mjs': 'control\n',

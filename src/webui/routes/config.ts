@@ -14,6 +14,7 @@ import {
 } from '../../core/config.js'
 import { compatibleCredentials, pickAgentWire, resolveInjectionModel } from '../../workspaces/credential-injection.js'
 import { redactConfigSection } from '../../core/redaction.js'
+import { inferCredentialVendor } from '../../core/credential-inference.js'
 
 /** Validate a `{ [wireShape]: baseUrl }` body into a typed wires map. */
 function parseWires(raw: unknown): Partial<Record<CredentialWireShape, string>> {
@@ -207,14 +208,28 @@ export function createConfigRoutes(opts?: ConfigRouteOpts) {
   /** POST /credentials — add an api-key credential (deduped by key). Returns slug. */
   app.post('/credentials', async (c) => {
     try {
-      const body = await c.req.json<{ vendor?: string; label?: string; wires?: unknown; baseUrl?: string; apiKey?: string; lastModel?: string }>()
+      const body = await c.req.json<{
+        vendor?: string; label?: string; wires?: unknown; baseUrl?: string; apiKey?: string;
+        lastModel?: string; agent?: string; wireShape?: string;
+      }>()
       const apiKey = body.apiKey?.trim()
       if (!apiKey) return c.json({ error: 'apiKey is required' }, 400)
-      const vendorParse = credentialVendorEnum.safeParse(body.vendor)
       const label = body.label?.trim()
       const lastModel = body.lastModel?.trim()
-      const wires = parseWires(body.wires)
       const baseUrl = body.baseUrl?.trim()
+      const wireParse = credentialWireShapeEnum.safeParse(body.wireShape)
+      const wires = parseWires(body.wires)
+      if (Object.keys(wires).length === 0 && wireParse.success) {
+        wires[wireParse.data] = baseUrl ?? ''
+      }
+      // The workspace credential modal still sends agent/wireShape instead of
+      // a vendor; infer it here so the canonical route can absorb that caller
+      // without keeping the legacy workspace-scoped write endpoint.
+      const vendorParse = credentialVendorEnum.safeParse(body.vendor ?? inferCredentialVendor({
+        ...(body.agent ? { agent: body.agent } : {}),
+        ...(baseUrl ? { baseUrl } : {}),
+        ...(wireParse.success ? { wireShape: wireParse.data } : {}),
+      }))
       const cred: Credential = {
         vendor: vendorParse.success ? vendorParse.data : 'custom',
         ...(label ? { label } : {}),

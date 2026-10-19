@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { writeAliceProjectProductStamp } from '../../../packages/cli/src/alice-project-product.ts'
 import { transformProjectTransferFile } from '../../../packages/cli/src/project-transfer-files.ts'
@@ -19,8 +19,16 @@ const execFile = promisify(execFileCallback)
 // Hosted Windows runners can spend well over Vitest's default 5s in real Git
 // and submodule I/O. Keep the larger budget scoped to those integration fixtures.
 const gitFixtureTimeoutMs = process.platform === 'win32' ? 20_000 : 5_000
+let savedSealingBackend: string | undefined
+
+beforeEach(() => {
+  savedSealingBackend = process.env['OPENALICE_SEALING_BACKEND']
+  process.env['OPENALICE_SEALING_BACKEND'] = 'file'
+})
 
 afterEach(async () => {
+  if (savedSealingBackend === undefined) delete process.env['OPENALICE_SEALING_BACKEND']
+  else process.env['OPENALICE_SEALING_BACKEND'] = savedSealingBackend
   await Promise.all(homes.splice(0).map((path) => rm(path, {
     recursive: true,
     force: true,
@@ -59,6 +67,7 @@ describe('AliceProject transfer planner', () => {
     expect(plan.portable.entries.map((entry) => entry.path)).not.toEqual(expect.arrayContaining([
       'sealing.key',
       'provider-keys.json',
+      'auth/local.token',
       'data/config/accounts.json',
       'data/config/connectors.json',
       'data/config/auth.json',
@@ -469,6 +478,8 @@ async function fixtureHome(): Promise<string> {
   })
   await writeJson(join(home, 'data', 'config', 'ports.json'), { web: 47331 })
   await writeJson(join(home, 'data', 'config', 'auth.json'), { tokenHash: 'machine-local' })
+  await mkdir(join(home, 'auth'), { recursive: true })
+  await writeFile(join(home, 'auth', 'local.token'), 'oa1_machine-local-token\n', { mode: 0o600 })
   await writeJson(join(home, 'data', 'config', 'sessions.json'), { sessions: [{ sid: 'derived-secret-canary' }] })
   await writeJson(join(home, 'data', 'config', 'sessions.json.tmp'), { sid: 'derived-secret-canary' })
   await writeText(join(home, 'data', 'logs', 'connector-io.jsonl'), 'native-agent-secret-canary\n')

@@ -20,7 +20,8 @@ import { amakeRequest } from '../../../core/provider/utils/helpers.js'
 import { EquitySearchQueryParamsSchema, EquitySearchDataSchema } from '../../../standard-models/equity-search.js'
 
 const SUGGEST_URL = 'https://searchapi.eastmoney.com/api/suggest/get'
-const TOKEN = 'D43BF722C8E33BDC906FB84D85E326E8'
+// Public fixed token used by Eastmoney's search endpoint; not a credential.
+const TOKEN = 'D43BF722C8E33BDC906FB84D85E326E8' // gitleaks:allow
 const HEADERS = { 'User-Agent': 'Mozilla/5.0', Referer: 'https://www.eastmoney.com/' }
 
 export const EastmoneyEquitySearchQueryParamsSchema = EquitySearchQueryParamsSchema

@@ -1946,7 +1946,7 @@ export async function saveCredential(input: {
   label?: string;
   wireShape?: WireShape;
 }): Promise<{ slug: string; vendor: string }> {
-  const res = await fetch('/api/workspaces/credentials', {
+  const res = await fetch('/api/config/credentials', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(input),

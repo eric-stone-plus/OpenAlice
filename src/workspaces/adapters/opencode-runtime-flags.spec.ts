@@ -51,6 +51,11 @@ describe('opencode runtime flags', () => {
         '--agent', 'trade',
       ]);
       expect(projected.webArgs).toEqual([]);
+      expect(projected.webConfigPin).toEqual({
+        model: 'deepseek/deepseek-flash',
+        reasoningEffort: 'max',
+        mode: 'trade',
+      });
       const config = JSON.parse(projected.env['OPENCODE_CONFIG_CONTENT']!);
       expect(config).toEqual({
         default_agent: 'trade',

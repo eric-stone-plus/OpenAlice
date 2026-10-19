@@ -39,6 +39,7 @@ const REQUIRED_PATHS = [
   'src/workspaces/cli/bin/pi-session-provider.ts',
   'services/uta/dist/uta.js',
   'services/connector/dist/connector.cjs',
+  'packages/sealing-key/dist/index.js',
   'packages/guardian-runtime/dist/index.js',
   RUNTIME_BUNDLE_ENTRYPOINT,
   'scripts/guardian/control-server.mjs',

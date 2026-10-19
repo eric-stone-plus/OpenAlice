@@ -3,7 +3,7 @@ import { dirname } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
 import { dataPath } from '@/core/paths.js'
-import { isSealedEnvelope, seal, unseal } from '@/core/sealing.js'
+import { hasSealedMarker, seal, unseal } from '@/core/sealing.js'
 
 export type ConnectorWorkKind = 'inbound' | 'artifact' | 'uta'
 
@@ -139,7 +139,7 @@ export class ConnectorWorkQueue implements ConnectorWorkQueueStore {
     if (this.state) return this.state
     try {
       const raw = JSON.parse(await readFile(this.path, 'utf8')) as unknown
-      if (!isSealedEnvelope(raw)) {
+      if (!hasSealedMarker(raw)) {
         throw new Error('Connector work queue is not a sealed envelope')
       }
       this.state = stateSchema.parse(await unseal(raw))

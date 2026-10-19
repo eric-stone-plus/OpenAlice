@@ -68,6 +68,9 @@ importers:
       '@traderalice/opentypebb':
         specifier: workspace:*
         version: link:packages/opentypebb
+      '@traderalice/sealing-key':
+        specifier: workspace:*
+        version: link:packages/sealing-key
       '@traderalice/update-lifecycle':
         specifier: workspace:*
         version: link:packages/update-lifecycle
@@ -201,6 +204,9 @@ importers:
       '@traderalice/guardian-runtime':
         specifier: workspace:*
         version: link:../../packages/guardian-runtime
+      '@traderalice/sealing-key':
+        specifier: workspace:*
+        version: link:../../packages/sealing-key
       '@traderalice/update-lifecycle':
         specifier: workspace:*
         version: link:../../packages/update-lifecycle
@@ -225,6 +231,9 @@ importers:
       '@traderalice/guardian-runtime':
         specifier: workspace:*
         version: link:../guardian-runtime
+      '@traderalice/sealing-key':
+        specifier: workspace:*
+        version: link:../sealing-key
       '@traderalice/update-lifecycle':
         specifier: workspace:*
         version: link:../update-lifecycle
@@ -252,6 +261,10 @@ importers:
         version: 3.2.6(@types/debug@4.1.13)(@types/node@22.19.15)(jiti@2.6.1)(jsdom@29.0.0(@noble/hashes@2.2.0))(lightningcss@1.32.0)(msw@2.14.6(@types/node@22.19.15)(typescript@5.9.3))(tsx@4.21.0)(yaml@2.9.0)
 
   packages/guardian-runtime:
+    dependencies:
+      '@traderalice/sealing-key':
+        specifier: workspace:*
+        version: link:../sealing-key
     devDependencies:
       '@types/node':
         specifier: ^25.2.3
@@ -314,6 +327,15 @@ importers:
         version: 8.5.1(jiti@2.6.1)(postcss@8.5.25)(tsx@4.21.0)(typescript@5.9.3)(yaml@2.9.0)
       typescript:
         specifier: ^5.7.3
+        version: 5.9.3
+
+  packages/sealing-key:
+    devDependencies:
+      '@types/node':
+        specifier: ^25.2.3
+        version: 25.2.3
+      typescript:
+        specifier: ^5.9.3
         version: 5.9.3
 
   packages/update-lifecycle:

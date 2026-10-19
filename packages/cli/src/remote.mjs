@@ -1158,7 +1158,7 @@ export function buildRemoteCloneCommand(appDir, installSource, repositoryUrl = D
 
 export function buildRemoteArtifactsProbeCommand(appDir) {
   const root = shellQuote(appDir)
-  return `root=${root}\ntest -f "$root/dist/main.js" \\\n  && test -f "$root/ui/dist/index.html" \\\n  && test -f "$root/services/uta/dist/uta.js" \\\n  && test -f "$root/services/connector/dist/connector.cjs" \\\n  && test -f "$root/packages/guardian-runtime/dist/index.js" \\\n  && test -d "$root/node_modules" \\\n  && printf ready || true`
+  return `root=${root}\ntest -f "$root/dist/main.js" \\\n  && test -f "$root/ui/dist/index.html" \\\n  && test -f "$root/services/uta/dist/uta.js" \\\n  && test -f "$root/services/connector/dist/connector.cjs" \\\n  && test -f "$root/packages/guardian-runtime/dist/index.js" \\\n  && test -f "$root/packages/sealing-key/dist/index.js" \\\n  && test -d "$root/node_modules" \\\n  && printf ready || true`
 }
 
 export function buildRemoteBuildToolsProbeCommand() {

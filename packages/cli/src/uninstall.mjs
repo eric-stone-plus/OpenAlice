@@ -228,6 +228,7 @@ Preserve:
   ${join(layout.installRoot, 'sources')}
   ${join(layout.installRoot, 'provider-keys.json')}
   ${join(layout.installRoot, 'sealing.key')}
+  ${join(layout.installRoot, 'state')}
   Agent Runtime executables and their native configuration
   ${layout.installRoot}
 `)

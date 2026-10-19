@@ -17,6 +17,9 @@ export interface UTAClientOptions {
   fetch?: typeof globalThis.fetch
   /** Request timeout in ms. Default 15s. */
   timeoutMs?: number
+  /** Local bearer token. When set, every request carries
+   *  `Authorization: Bearer <token>`. UTA rejects unauthenticated requests. */
+  token?: string
 }
 
 export interface UTAClient {
@@ -67,7 +70,10 @@ export function createUTAClient(options: UTAClientOptions): UTAClient {
     const signal = opts.signal ?? controller.signal
     const init: RequestInit = {
       method,
-      headers: { 'content-type': 'application/json' },
+      headers: {
+        'content-type': 'application/json',
+        ...(options.token ? { authorization: `Bearer ${options.token}` } : {}),
+      },
       signal,
     }
     if (opts.body !== undefined) init.body = JSON.stringify(opts.body)

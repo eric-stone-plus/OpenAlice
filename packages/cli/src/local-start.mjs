@@ -18,6 +18,7 @@ const RUNTIME_ARTIFACTS = [
   'ui/dist/index.html',
   'services/uta/dist/uta.js',
   'services/connector/dist/connector.cjs',
+  'packages/sealing-key/dist/index.js',
   'packages/guardian-runtime/dist/index.js',
   'node_modules',
 ]

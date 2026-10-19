@@ -22,6 +22,25 @@ import type { WebSessionTransport, WebTransportContext } from './transport.js'
 
 const ACP_PROTOCOL_VERSION = 1
 const SESSION_LOAD_TIMEOUT_MS = 120_000
+const MODEL_OPTION_IDS = ['model'] as const
+const EFFORT_OPTION_IDS = ['effort', 'reasoningEffort', 'reasoning_effort', 'variant'] as const
+const MODE_OPTION_IDS = ['mode'] as const
+
+type PinKind = 'model' | 'effort' | 'mode'
+type ConfigPin = NonNullable<WebTransportContext['input']['configPin']>
+
+/** One matcher table for discovery and for the post-change pin guard, so the
+ *  two paths cannot drift when a runtime renames an option id. */
+const PINNED_OPTION_MATCHERS: Record<PinKind, {
+  readonly ids: readonly string[]
+  readonly categories: readonly string[]
+  readonly value: (pin: ConfigPin) => string | undefined
+}> = {
+  model: { ids: MODEL_OPTION_IDS, categories: ['model'], value: pin => pin.model },
+  effort: { ids: EFFORT_OPTION_IDS, categories: ['thought_level', 'effort'], value: pin => pin.reasoningEffort },
+  mode: { ids: MODE_OPTION_IDS, categories: ['mode'], value: pin => pin.mode },
+}
+const PIN_KINDS: readonly PinKind[] = ['model', 'effort', 'mode']
 
 interface PendingPermission {
   readonly rpcId: string | number
@@ -79,14 +98,15 @@ export class AcpTransport implements WebSessionTransport {
     // Trade profile; a missing mode means the app-owned pin failed, so fail
     // loudly instead of silently running the terminal's auto/goal default.
     const requestedMode = this.ctx.input.agentMode
+    const modeOption = this.findPinnedOption('mode')
     const modeOffered = requestedMode
-      ? this.ctx.state.configOptions.some((option) => option.id === 'mode'
-        && option.options.some((entry) => entry.value === requestedMode))
+      ? modeOption?.options.some((entry) => entry.value === requestedMode) === true
       : false
     if (requestedMode && !modeOffered) {
       throw new Error(`${this.ctx.input.agent} did not offer the requested ${requestedMode} session mode`)
     }
-    if (requestedMode) await this.configure('mode', requestedMode)
+    if (requestedMode && modeOption) await this.configure(modeOption.id, requestedMode)
+    await this.applyConfigPin()
     this.ctx.state.setPhase('idle')
   }
 
@@ -121,12 +141,20 @@ export class AcpTransport implements WebSessionTransport {
     if (!option.options.some((entry) => entry.value === value)) {
       throw new Error(`value ${value} is not offered for config option ${configId}`)
     }
+    const pinned = this.pinnedValueFor(option)
+    if (pinned !== undefined && value !== pinned) {
+      throw new Error(`${configId} is pinned to ${pinned} by OpenAlice; ${value} is not allowed`)
+    }
     const result = await this.peer.request('session/set_config_option', {
       sessionId: this.sessionId,
       configId,
       value,
     })
     this.applyConfigOptions(result)
+    if (this.ctx.input.configPin) {
+      const mode = this.findPinnedOption('mode')
+      if (mode && configId === mode.id) await this.applyConfigPin(true)
+    }
   }
 
   async respond(requestId: string, optionId: string): Promise<void> {
@@ -214,6 +242,59 @@ export class AcpTransport implements WebSessionTransport {
   private applyConfigOptions(value: unknown): void {
     const options = configOptionsFrom(value)
     if (options.length > 0) this.ctx.state.setConfigOptions(options)
+  }
+
+  /** Apply the adapter-owned invariant after session/new or session/load.
+   *  Model/effort may be absent when the process-local overlay already set
+   *  them; mode is app-owned, so a missing mode option fails closed. An
+   *  offered option with an unavailable pinned value always fails closed. */
+  private async applyConfigPin(skipMode = false): Promise<void> {
+    const pin = this.ctx.input.configPin
+    if (!pin) return
+    if (pin.mode && !skipMode) {
+      const mode = this.findPinnedOption('mode')
+      if (!mode) {
+        throw new Error(`${this.ctx.input.agent} did not offer the pinned session mode ${pin.mode}`)
+      }
+      if (!mode.options.some((entry) => entry.value === pin.mode)) {
+        throw new Error(`${this.ctx.input.agent} does not offer the pinned session mode ${pin.mode}`)
+      }
+      if (mode.currentValue !== pin.mode) await this.configure(mode.id, pin.mode)
+    }
+    const model = this.findPinnedOption('model')
+    if (pin.model && model) {
+      if (!model.options.some((entry) => entry.value === pin.model)) {
+        throw new Error(`${this.ctx.input.agent} does not offer the pinned model ${pin.model}`)
+      }
+      if (model.currentValue !== pin.model) await this.configure(model.id, pin.model)
+    }
+    const effort = this.findPinnedOption('effort')
+    if (pin.reasoningEffort && effort) {
+      if (!effort.options.some((entry) => entry.value === pin.reasoningEffort)) {
+        throw new Error(`${this.ctx.input.agent} does not offer the pinned effort ${pin.reasoningEffort}`)
+      }
+      if (effort.currentValue !== pin.reasoningEffort) await this.configure(effort.id, pin.reasoningEffort)
+    }
+  }
+
+  private findPinnedOption(kind: PinKind): WebSessionConfigOption | undefined {
+    const matcher = PINNED_OPTION_MATCHERS[kind]
+    return this.ctx.state.configOptions.find((option) =>
+      matcher.ids.includes(option.id)
+      || (option.category !== undefined && matcher.categories.includes(option.category)))
+  }
+
+  private pinnedValueFor(option: WebSessionConfigOption): string | undefined {
+    const pin = this.ctx.input.configPin
+    if (!pin) return undefined
+    for (const kind of PIN_KINDS) {
+      const matcher = PINNED_OPTION_MATCHERS[kind]
+      if (matcher.ids.includes(option.id)
+        || (option.category !== undefined && matcher.categories.includes(option.category))) {
+        return matcher.value(pin)
+      }
+    }
+    return undefined
   }
 
   private applyToolStatus(id: string, update: JsonObject): void {

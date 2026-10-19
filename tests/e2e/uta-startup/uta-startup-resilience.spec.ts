@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { createServer, type Server } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -114,8 +114,11 @@ describe('UTA process startup resilience', () => {
           throw new Error(`UTA exited during one-account handshake failure:\n${output}`)
         }
         try {
+          const token = (await readFile(join(home, 'auth', 'local.token'), 'utf8').catch(() => '')).trim()
           const health = await fetch(`http://127.0.0.1:${utaPort}/__uta/health`)
-          const listing = await fetch(`http://127.0.0.1:${utaPort}/api/trading/uta`)
+          const listing = await fetch(`http://127.0.0.1:${utaPort}/api/trading/uta`, {
+            headers: token ? { authorization: `Bearer ${token}` } : {},
+          })
           if (health.ok && listing.ok) {
             const healthBody = await health.json() as { ok?: boolean; utas?: number }
             const listingBody = await listing.json() as { utas?: ListedAccount[] }
@@ -145,6 +148,8 @@ describe('UTA process startup resilience', () => {
       }
 
       expect(account, output).toBeDefined()
+      const unauthenticated = await fetch(`http://127.0.0.1:${utaPort}/api/trading/uta`)
+      expect(unauthenticated.status, 'UTA trading routes require the local bearer token').toBe(401)
       expect(account?.health?.lastError).toContain('closed during handshake')
       expect(unaffected?.health).toMatchObject({ status: 'healthy', reach: 'readable' })
       expect(child.exitCode).toBeNull()

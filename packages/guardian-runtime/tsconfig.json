@@ -3,6 +3,7 @@
     "target": "ES2023",
     "module": "ESNext",
     "moduleResolution": "bundler",
+    "customConditions": ["openalice-source"],
     "strict": true,
     "outDir": "dist",
     "rootDir": "src",

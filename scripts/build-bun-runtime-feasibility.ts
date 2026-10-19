@@ -130,7 +130,7 @@ try {
   if (new Set(initialPids).size !== 4) {
     throw new Error(`Guardian/Alice/UTA/Connector did not have four distinct PIDs: ${initialPids}`)
   }
-  externalBrokerPack = await waitForBrokerPackFixture(utaPort, brokerPackFixture)
+  externalBrokerPack = await waitForBrokerPackFixture(utaPort, brokerPackFixture, smokeHome)
   await Bun.sleep(1_000)
   idleMemoryBytes = await measureRuntimeMemory(initialStatus)
 
@@ -162,7 +162,7 @@ try {
       && typeof status.componentDetail?.uta?.pid === 'number'
       && status.componentDetail.uta.pid !== utaPid
   ), 30_000)
-  await waitForBrokerPackFixture(utaPort, brokerPackFixture)
+  await waitForBrokerPackFixture(utaPort, brokerPackFixture, smokeHome)
 } catch (error) {
   acceptanceError = error
 } finally {
@@ -357,6 +357,7 @@ async function waitForBrokerPackFixture(
     sdkMarker: string
     expectedLabel: string
   },
+  home: string,
   timeoutMs = 30_000,
 ): Promise<{
   engine: string
@@ -370,7 +371,10 @@ async function waitForBrokerPackFixture(
   let last = ''
   while (Date.now() < deadline) {
     try {
-      const response = await fetch(url)
+      const token = (await readFile(join(home, 'auth', 'local.token'), 'utf8').catch(() => '')).trim()
+      const response = await fetch(url, {
+        headers: token ? { authorization: `Bearer ${token}` } : {},
+      })
       last = await response.text()
       if (response.ok) {
         const body = JSON.parse(last) as {

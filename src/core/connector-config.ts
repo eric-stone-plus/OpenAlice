@@ -14,7 +14,7 @@ import {
   type PublicConnectorConfig,
 } from '@traderalice/connector-protocol'
 import { dataPath } from './paths.js'
-import { isSealedEnvelope, seal, unseal } from './sealing.js'
+import { hasSealedMarker, seal, unseal } from './sealing.js'
 
 const CONNECTORS_FILE = dataPath('config', 'connectors.json')
 const SERVICE_FILE = dataPath('config', 'connector-service.json')
@@ -29,7 +29,7 @@ const MUTATION_LOCK_STALE_MS = 30_000
 export async function readConnectorConfig(): Promise<ConnectorConfig> {
   try {
     const raw = JSON.parse(await readFile(CONNECTORS_FILE, 'utf8')) as unknown
-    const value = isSealedEnvelope(raw) ? await unseal(raw) : raw
+    const value = hasSealedMarker(raw) ? await unseal(raw) : raw
     return connectorConfigSchema.parse(value)
   } catch (error) {
     if (isENOENT(error)) return { version: 1, adapters: {} }

@@ -911,8 +911,9 @@ app.whenReady().then(async () => {
     } catch (err) {
       dialog.showErrorBox(
         'OpenAlice — data relocation failed',
-        `Could not move the user data store from\n${app.getPath('userData')}/data\nto\n${userDataHome}/data\n\n` +
-          `${err instanceof Error ? err.message : String(err)}\n\nNothing was deleted. Please move the directory manually, then relaunch.`,
+        `Could not move the user data store from\n${app.getPath('userData')}\nto\n${userDataHome}\n\n` +
+          `This includes data/ and the sealing key files beside it.\n\n` +
+          `${err instanceof Error ? err.message : String(err)}\n\nOpenAlice stopped before completing the move. Review the legacy and new data directories before relaunching; some items may already have moved.`,
       )
       app.quit()
       return

@@ -17,6 +17,7 @@ const workspaceAliases = {
   '@traderalice/update-lifecycle/node': resolve(__dirname, './packages/update-lifecycle/src/node.ts'),
   '@traderalice/update-lifecycle': resolve(__dirname, './packages/update-lifecycle/src/index.ts'),
   '@traderalice/opentypebb': resolve(__dirname, './packages/opentypebb/src/index.ts'),
+  '@traderalice/sealing-key': resolve(__dirname, './packages/sealing-key/src/index.ts'),
 }
 
 // Deterministic local integration only; these are not end-to-end app journeys. Public providers and local

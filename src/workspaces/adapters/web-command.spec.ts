@@ -85,6 +85,16 @@ describe('Web surface command composition', () => {
     const argv = codexAdapter.composeWebCommand!([], ctx({ env: { AQ_WS_ID: 'ws-1', OPENALICE_MCP_URL: 'http://127.0.0.1:1/mcp' } }))
     expect(argv.slice(-3)).toEqual(['app-server', '--listen', 'stdio://'])
     expect(argv).toContain('mcp_servers.openalice.url="http://127.0.0.1:1/mcp"')
+    for (const key of [
+      'mcp_servers.openalice.url="http://127.0.0.1:1/mcp"',
+      'mcp_servers.openalice.bearer_token_env_var="OPENALICE_LOCAL_TOKEN"',
+      'mcp_servers.openalice-workspace.url="http://127.0.0.1:1/mcp/ws-1"',
+      'mcp_servers.openalice-workspace.bearer_token_env_var="OPENALICE_LOCAL_TOKEN"',
+    ]) {
+      const index = argv.indexOf(key)
+      expect(index, key).toBeGreaterThan(0)
+      expect(argv[index - 1], key).toBe('-c')
+    }
     expect(argv).not.toContain('sandbox_workspace_write.network_access=true')
     expect(argv).not.toContain('--ask-for-approval')
     expect(argv).not.toContain('--sandbox')

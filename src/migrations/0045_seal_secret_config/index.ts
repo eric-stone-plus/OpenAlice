@@ -1,7 +1,12 @@
 import { chmod, mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import type { Migration, MigrationContext } from '../types.js'
-import { isSealedEnvelope, seal } from '../../core/sealing.js'
+import {
+  hasSealedMarker,
+  seal,
+  sealingKeyCredentialPath,
+  sealingKeyPath,
+} from '../../core/sealing.js'
 import { SECRET_CONFIG_FILES, globalProviderKeysFile } from '../../core/secret-files.js'
 
 /**
@@ -22,7 +27,7 @@ async function sealIfPlaintext(path: string): Promise<void> {
     }
     throw err
   }
-  if (isSealedEnvelope(raw)) {
+  if (hasSealedMarker(raw)) {
     await chmod(path, 0o600).catch(() => { /* platform without chmod */ })
     return
   }
@@ -35,7 +40,8 @@ export async function migrateSealSecretConfig(ctx: MigrationContext): Promise<vo
   await mkdir(dir, { recursive: true, mode: 0o700 })
   await chmod(dir, 0o700).catch(() => { /* platform without chmod */ })
   await chmod(dirname(dir), 0o700).catch(() => { /* platform without chmod */ })
-  await chmod(resolve(ctx.userDataHome(), 'sealing.key'), 0o600).catch(() => { /* absent on first run */ })
+  await chmod(sealingKeyPath(ctx.userDataHome()), 0o600).catch(() => { /* absent on first run */ })
+  await chmod(sealingKeyCredentialPath(ctx.userDataHome()), 0o600).catch(() => { /* absent on first run */ })
 
   for (const filename of SECRET_CONFIG_FILES) {
     await sealIfPlaintext(resolve(dir, filename))

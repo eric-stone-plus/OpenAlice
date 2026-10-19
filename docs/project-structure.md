@@ -417,11 +417,15 @@ Workspaces, locks, credentials, sealing, and Broker Packs must remain coherent.
 │   └── auto-quant-v2-mirror/  shared AutoQuant V2 source mirror
 ├── state/
 │   ├── guardian.lock          launcher ownership
-│   └── runtime.lock           shared writer ownership
+│   ├── runtime.lock           shared writer ownership
+│   ├── sealing.key.cred       user-scoped systemd credential (Linux default)
+│   └── sealing.key.fp         non-secret SHA-256 verifier for copied-home fallback
+├── auth/
+│   └── local.token            local bearer token (0600; not portable)
 ├── runtime/
 │   └── broker-packs/          replaceable, platform-specific broker SDK packs
 ├── provider-keys.json         user-global AI provider credentials
-└── sealing.key                machine-bound encryption key; not in data/
+└── sealing.key                legacy plaintext fallback; not in data/
 ```
 
 Overrides:
@@ -431,8 +435,8 @@ Overrides:
 - `OPENALICE_APP_HOME` points to replaceable app resources such as templates,
   defaults, UI assets, and packaged CLI shims.
 
-`data/` is the portable backup/migration unit. `sealing.key` deliberately
-lives beside it so a copied data directory does not carry its decryption key.
+`data/` is the portable backup/migration unit. Sealing-key material deliberately
+lives outside it so a copied data directory does not carry its decryption key.
 The active migration chain starts after the 0.89.2-beta baseline. A
 transformation for a persisted shape that has shipped belongs in
 `src/migrations/`, must be idempotent, and must declare affected paths for the

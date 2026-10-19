@@ -24,6 +24,16 @@ const CODEX_ISOLATED_CONFIG_PATH = `${CODEX_ISOLATED_HOME_PATH}/config.toml`;
 const CODEX_ISOLATED_ENV_PATH = `${CODEX_ISOLATED_HOME_PATH}/env.json`;
 const CODEX_LEGACY_ENV_PATH = '.codex/env.json';
 const CODEX_KEY_ENV_NAME = 'OPENALICE_WORKSPACE_KEY';
+const LAUNCHER_OWNED_ENV = new Set([
+  'PATH', 'HOME', 'NODE_OPTIONS', 'LD_PRELOAD', 'LD_LIBRARY_PATH',
+  'DYLD_INSERT_LIBRARIES', 'DYLD_LIBRARY_PATH', 'BASH_ENV', 'ENV',
+  'OPENALICE_MCP_URL', 'OPENALICE_TOOL_URL', 'OPENALICE_TOOL_SOCKET',
+  'OPENALICE_LOCAL_TOKEN', 'OPENALICE_LOCAL_TOKEN_FILE', 'OPENALICE_HOME',
+  'OPENALICE_PROJECT_ID', 'OPENALICE_GLOBAL_DIR', 'OPENALICE_SEALING_BACKEND',
+  'OPENALICE_SYSTEMD_CREDS', 'OPENALICE_WORKSPACE_CLI_BIN_PATH',
+  'OPENALICE_TERMINAL_THEME', 'AQ_WS_ID', 'AQ_RUN_ID', 'AQ_SESSION_ID',
+  'CODEX_HOME',
+]);
 const CODEX_SESSION_KEY_ENV_NAME = 'OPENALICE_SESSION_KEY';
 const CODEX_PROVIDER_NAME = 'workspace';
 const CODEX_SESSION_PROVIDER_NAME = 'openalice_session';
@@ -603,7 +613,8 @@ export const codexAdapter: CliAdapter = {
         const parsed: unknown = JSON.parse(readFileSync(envFile, 'utf8'));
         if (parsed && typeof parsed === 'object') {
           for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
-            if (typeof v === 'string' && /^[A-Za-z_][A-Za-z0-9_]*$/.test(k)) {
+            if (typeof v === 'string' && /^[A-Za-z_][A-Za-z0-9_]*$/.test(k)
+              && !LAUNCHER_OWNED_ENV.has(k)) {
               result[k] = v;
             }
           }
@@ -710,12 +721,16 @@ function codexMcpConfigArgs(ctx: SpawnContext): string[] {
     '-c',
     `mcp_servers.openalice.url="${mcpUrl}"`,
     '-c',
+    `mcp_servers.openalice.bearer_token_env_var="OPENALICE_LOCAL_TOKEN"`,
+    '-c',
     // `openalice-workspace` is a valid TOML bare key (hyphen is allowed in bare
     // keys), so it needs NO quoting. Quoting the segment as
     // `"openalice-workspace"` made codex carry the literal quotes into the MCP
     // server name, which then failed codex's own `^[a-zA-Z0-9_-]+$` name check
     // ("Invalid MCP server name '\"openalice-workspace\"'").
     `mcp_servers.openalice-workspace.url="${mcpUrl}/${workspaceId}"`,
+    '-c',
+    `mcp_servers.openalice-workspace.bearer_token_env_var="OPENALICE_LOCAL_TOKEN"`,
   ];
 }
 

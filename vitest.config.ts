@@ -19,6 +19,7 @@ const workspaceAliases = {
   '@traderalice/connector-protocol': resolve(__dirname, './packages/connector-protocol/src/index.ts'),
   '@traderalice/ibkr': resolve(__dirname, './packages/ibkr/src/index.ts'),
   '@traderalice/opentypebb': resolve(__dirname, './packages/opentypebb/src/index.ts'),
+  '@traderalice/sealing-key': resolve(__dirname, './packages/sealing-key/src/index.ts'),
   '@traderalice/uta-protocol': resolve(__dirname, './packages/uta-protocol/src/index.ts'),
 }
 

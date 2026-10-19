@@ -19,6 +19,19 @@ import { extractMcpShape } from '../../../src/core/mcp-export.js'
 import { inboxPushFactory } from '../../../src/tool/inbox-push.js'
 import { registerCliRoutes, type CliGatewayDeps } from '../../../src/server/cli.js'
 
+// The gateway is fail-closed without a token. Give every fixture app one and
+// inject it as a header so the tests exercise dispatch, not auth failures.
+const TEST_TOKEN = `oa1_${'A'.repeat(43)}`
+process.env.OPENALICE_LOCAL_TOKEN = TEST_TOKEN
+function makeTestApp(): Hono {
+  const app = new Hono()
+  app.use('*', async (c, next) => {
+    c.req.raw.headers.set('authorization', `Bearer ${TEST_TOKEN}`)
+    await next()
+  })
+  return app
+}
+
 /**
  * Exercise gateway validation, dispatch and response unwrapping with a local
  * search fixture; no market provider is contacted.
@@ -52,7 +65,7 @@ function makeApp(manifestOnly = false): Hono {
     getWorkspaceService: () => fakeSvc as never,
   }
 
-  const app = new Hono()
+  const app = makeTestApp()
   registerCliRoutes(app, deps, manifestOnly)
   return app
 }
@@ -187,7 +200,7 @@ describe('CLI gateway — UTA decision provenance', () => {
       sessionRegistry: { get: () => undefined },
       provenanceStore: { append },
     }
-    const app = new Hono()
+    const app = makeTestApp()
     registerCliRoutes(app, {
       toolCenter,
       workspaceToolCenter: new WorkspaceToolCenter(),
@@ -254,7 +267,7 @@ describe('CLI gateway — inbox read (scoped, string-arg coercion)', () => {
         ),
       },
     }
-    const app = new Hono()
+    const app = makeTestApp()
     registerCliRoutes(app, {
       toolCenter: new ToolCenter(),
       workspaceToolCenter: wtc,
@@ -333,7 +346,7 @@ describe('CLI gateway — agent-invisible origin (x-openalice-run → registry)'
     wtc.register(inboxPushFactory)
     const globals = new ToolCenter()
     globals.register({ inbox_push: tool({ inputSchema: z.object({ comments: z.string() }), execute: (): string => { throw new Error('Global shadow must never run') } }) }, 'shadow')
-    const app = new Hono()
+    const app = makeTestApp()
     registerCliRoutes(app, {
       toolCenter: globals,
       workspaceToolCenter: wtc,
@@ -445,7 +458,7 @@ describe('CLI gateway — peer path (cross-workspace resolution)', () => {
     const wtc = new WorkspaceToolCenter()
     wtc.register(workspacePathFactory)
 
-    const app = new Hono()
+    const app = makeTestApp()
     registerCliRoutes(app, {
       toolCenter: new ToolCenter(),
       workspaceToolCenter: wtc,
@@ -519,7 +532,7 @@ describe('Workspace CLI configuration', () => {
       const wtc = new WorkspaceToolCenter()
       const execute = vi.fn(async () => ({ ok: true }))
       wtc.register({ name: 'workspace_list', build: () => tool({ inputSchema: z.object({}), execute }) })
-      const server = new Hono()
+      const server = makeTestApp()
       registerCliRoutes(server, {
         toolCenter: new ToolCenter(), workspaceToolCenter: wtc, inboxStore: {} as never, entityStore: {} as never,
         getWorkspaceService: () => ({ registry: { get: () => ({ id: 'one', tag: 'one', dir }) } }) as never,
@@ -546,7 +559,7 @@ describe('Issue run CLI end to end', () => {
     const workspaceToolCenter = new WorkspaceToolCenter()
     workspaceToolCenter.register(issueRunNowFactory)
     workspaceToolCenter.register(issueRetryFactory)
-    const app = new Hono()
+    const app = makeTestApp()
     registerCliRoutes(app, {
       toolCenter: new ToolCenter(), workspaceToolCenter,
       inboxStore: {} as never, entityStore: {} as never,

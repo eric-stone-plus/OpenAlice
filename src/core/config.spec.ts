@@ -23,6 +23,7 @@ vi.mock('fs/promises', () => ({
 // this file's on-disk JSON assertions readable, and spares the mocked
 // fs/promises from having to simulate the key file.
 vi.mock('./sealing.js', () => ({
+  hasSealedMarker: () => false,
   isSealedEnvelope: () => false,
   seal: async (v: unknown) => v,
   unseal: async (v: unknown) => v,

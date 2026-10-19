@@ -12,10 +12,12 @@ import { join } from 'node:path'
 let home: string
 let configDir: string
 let savedHome: string | undefined
+let savedBackend: string | undefined
 
 async function loadConfigModule() {
   vi.resetModules()
   process.env['OPENALICE_HOME'] = home
+  process.env['OPENALICE_SEALING_BACKEND'] = 'file'
   const config = await import('./config.js')
   const sealing = await import('./sealing.js')
   return { config, sealing }
@@ -23,6 +25,7 @@ async function loadConfigModule() {
 
 beforeEach(async () => {
   savedHome = process.env['OPENALICE_HOME']
+  savedBackend = process.env['OPENALICE_SEALING_BACKEND']
   home = await mkdtemp(join(tmpdir(), 'oa-accounts-'))
   configDir = join(home, 'data', 'config')
 })
@@ -30,6 +33,8 @@ beforeEach(async () => {
 afterEach(async () => {
   if (savedHome === undefined) delete process.env['OPENALICE_HOME']
   else process.env['OPENALICE_HOME'] = savedHome
+  if (savedBackend === undefined) delete process.env['OPENALICE_SEALING_BACKEND']
+  else process.env['OPENALICE_SEALING_BACKEND'] = savedBackend
   vi.resetModules()
   await rm(home, { recursive: true, force: true })
 })
@@ -76,10 +81,30 @@ describe('UTA accounts at-rest sealing', () => {
     expect(back[0].presetConfig['apiKey']).toBe('plain-api-key')
   })
 
-  it('quarantines an unreadable sealed store and recovers with an empty one', async () => {
+  it('fails closed without deleting ciphertext when the sealing key is missing', async () => {
     const { config, sealing } = await loadConfigModule()
     await config.writeUTAsConfig([ACCOUNT] as never)
-    await rm(join(home, 'sealing.key')) // simulate data/ copied to a machine without the key
+    await rm(sealing.sealingKeyPath()) // simulate data/ copied to a machine without the key
+
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      await expect(config.readUTAsConfig()).rejects.toThrow(/machine key|does not exist/)
+    } finally {
+      errSpy.mockRestore()
+    }
+
+    // The ciphertext stays exactly where it was; no quarantine and no empty
+    // reseed, so restoring the key recovers the accounts.
+    const files = await readdir(configDir)
+    expect(files.some((f) => f.startsWith('accounts.json.sealed-unreadable-'))).toBe(false)
+    const onDisk = JSON.parse(await readFile(join(configDir, 'accounts.json'), 'utf-8'))
+    expect(sealing.isSealedEnvelope(onDisk)).toBe(true)
+  })
+
+  it('quarantines an unreadable sealed store when the key is present but wrong', async () => {
+    const { config, sealing } = await loadConfigModule()
+    await config.writeUTAsConfig([ACCOUNT] as never)
+    await writeFile(sealing.sealingKeyPath(), `${Buffer.alloc(32, 9).toString('base64')}\n`, { mode: 0o600 })
 
     const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
     try {

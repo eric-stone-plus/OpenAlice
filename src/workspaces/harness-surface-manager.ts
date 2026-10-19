@@ -4,8 +4,10 @@ import { randomBytes } from 'node:crypto'
 
 import { terminateProcessTree } from '@traderalice/guardian-runtime'
 
+import { buildHarnessEnv, sandboxHarnessCommand } from './harness-sandbox.js'
 import { buildSpawnEnv } from './spawn-env.js'
 import { resolveLaunchCommand } from './win-command.js'
+import { userDataHome } from '../core/paths.js'
 import { readHarnessManifest, HarnessManifestError } from './harness-manifest.js'
 import type { WorkspaceRegistry } from './workspace-registry.js'
 import { logger as launcherLogger } from './logger.js'
@@ -163,12 +165,12 @@ export class HarnessSurfaceManager {
     }
     this.runtimes.set(runtime.key, runtime)
 
-    const env = buildSpawnEnv(process.env, {
+    const env = buildHarnessEnv(buildSpawnEnv(process.env, {
       HARNESS_CAPABILITY: capability,
       HARNESS_HOST: BIND_HOST,
       HARNESS_PORTS: JSON.stringify(ports),
       HARNESS_NO_OPEN: '1',
-    }, workspace.dir)
+    }, workspace.dir))
     const resolved = resolveLaunchCommand(declared.command, { env, cwd: workspace.dir })
     const [file, ...args] = resolved.argv
     if (!file) throw new Error('Harness capability command is empty')
@@ -181,8 +183,41 @@ export class HarnessSurfaceManager {
       launchMode: resolved.mode,
       portNames: Object.keys(ports),
     })
+    let sandboxed
     try {
-      const child = spawn(file, args, {
+      sandboxed = sandboxHarnessCommand({
+        file,
+        args,
+        cwd: workspace.dir,
+        home: env['HOME'],
+        dataHome: process.env['OPENALICE_HOME'] ?? userDataHome,
+        env,
+        controlEnv: process.env,
+      })
+    } catch (err) {
+      runtime.phase = 'failed'
+      runtime.error = err instanceof Error ? err.message : String(err)
+      launcherLogger.error('harness_surface.sandbox_failed', {
+        workspaceId,
+        capability,
+        error: runtime.error,
+      })
+      return project(runtime)
+    }
+    launcherLogger.info('harness_surface.sandbox', {
+      workspaceId,
+      capability,
+      mode: sandboxed.mode,
+    })
+    if (sandboxed.mode === 'none') {
+      launcherLogger.warn('harness_surface.sandbox_unavailable', {
+        workspaceId,
+        capability,
+        hint: 'install bubblewrap or set OPENALICE_HARNESS_SANDBOX=required to fail closed',
+      })
+    }
+    try {
+      const child = spawn(sandboxed.file, sandboxed.args, {
         cwd: workspace.dir,
         env,
         stdio: ['ignore', 'pipe', 'pipe'],

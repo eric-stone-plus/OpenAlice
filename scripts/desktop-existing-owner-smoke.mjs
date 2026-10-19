@@ -89,6 +89,7 @@ function waitForExit(child, label, exitTimeoutMs = 10_000) {
 }
 
 if (!skipBuild) {
+  run('build sealing key package', 'pnpm', ['-F', '@traderalice/sealing-key', 'build'])
   run('build Guardian runtime', 'pnpm', ['-F', '@traderalice/guardian-runtime', 'build'])
   run('build Electron main', 'pnpm', ['-F', '@traderalice/desktop', 'build'])
 }

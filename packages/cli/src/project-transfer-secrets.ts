@@ -5,8 +5,6 @@
  * stream, and a freshly sealed destination file.
  */
 import {
-  createCipheriv,
-  createDecipheriv,
   randomBytes,
 } from 'node:crypto'
 import {
@@ -18,15 +16,17 @@ import {
   writeFile,
 } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
+import {
+  isSealedEnvelope,
+  sealAt,
+  SEALING_ALG,
+  unsealAt,
+} from '@traderalice/sealing-key'
 
 import {
   readAiProviderVault,
   type AiProviderVault,
 } from './ai-credential-copy.ts'
-
-const ALG = 'aes-256-gcm'
-const KEY_BYTES = 32
-const IV_BYTES = 12
 
 export interface ProjectTransferCredentialBundle {
   ai: ProjectTransferAiVault
@@ -46,14 +46,6 @@ export interface ProjectTransferCredentialSummary {
   broker: { count: number; presets: string[] }
   connector: { count: number; adapters: string[] }
   providerKeys: { count: number; vendors: string[] }
-}
-
-interface SealedEnvelope {
-  $sealed: 1
-  alg: string
-  iv: string
-  tag: string
-  data: string
 }
 
 export async function readProjectTransferCredentialBundle(
@@ -134,18 +126,7 @@ export async function sealProjectTransferJson(
   relativePath: string,
   value: unknown,
 ): Promise<void> {
-  const key = await loadOrCreateDestinationKey(home)
-  const iv = randomBytes(IV_BYTES)
-  const cipher = createCipheriv(ALG, key, iv)
-  const plaintext = Buffer.from(JSON.stringify(value), 'utf8')
-  const data = Buffer.concat([cipher.update(plaintext), cipher.final()])
-  const envelope: SealedEnvelope = {
-    $sealed: 1,
-    alg: ALG,
-    iv: iv.toString('base64'),
-    tag: cipher.getAuthTag().toString('base64'),
-    data: data.toString('base64'),
-  }
+  const envelope = await sealAt(home, value)
   await writePrivateJson(join(home, relativePath), envelope)
 }
 
@@ -169,52 +150,17 @@ export async function unsealProjectTransferJson(
   if (!isSealedEnvelope(value)) {
     throw transferSecretError(`${label} is a malformed sealed envelope.`)
   }
-  if (value.alg !== ALG) {
+  if (value.alg !== SEALING_ALG) {
     throw transferSecretError(`${label} uses unsupported sealing algorithm "${value.alg}".`)
   }
-  const key = await readSourceKey(home)
-  if (!key) throw transferSecretError(`${label} is sealed but the source sealing key is missing.`)
   try {
-    const decipher = createDecipheriv(ALG, key, Buffer.from(value.iv, 'base64'))
-    decipher.setAuthTag(Buffer.from(value.tag, 'base64'))
-    const plaintext = Buffer.concat([
-      decipher.update(Buffer.from(value.data, 'base64')),
-      decipher.final(),
-    ])
-    return JSON.parse(plaintext.toString('utf8')) as unknown
+    // Transfer must not migrate or delete keys in the source home.
+    return await unsealAt(home, value, process.env, { migrate: false })
   } catch (error: unknown) {
-    throw transferSecretError(`${label} could not be unsealed.`, error)
+    // Keep CLI output free of internal key paths and systemd stderr; the
+    // cause is retained for the caller's diagnostic log.
+    throw transferSecretError(`${label} could not be unsealed with the source home's sealing key.`, error)
   }
-}
-
-async function readSourceKey(home: string): Promise<Buffer | null> {
-  try {
-    const key = Buffer.from((await readFile(join(home, 'sealing.key'), 'utf8')).trim(), 'base64')
-    if (key.length !== KEY_BYTES) throw transferSecretError('The source sealing key is malformed.')
-    return key
-  } catch (error: unknown) {
-    if (isNodeError(error, 'ENOENT')) return null
-    throw error
-  }
-}
-
-async function loadOrCreateDestinationKey(home: string): Promise<Buffer> {
-  const existing = await readSourceKey(home)
-  if (existing) return existing
-  const path = join(home, 'sealing.key')
-  const key = randomBytes(KEY_BYTES)
-  await mkdir(dirname(path), { recursive: true, mode: 0o700 })
-  try {
-    await writeFile(path, `${key.toString('base64')}\n`, { mode: 0o600, flag: 'wx' })
-    await chmod(path, 0o600).catch(() => undefined)
-  } catch (error: unknown) {
-    if (isNodeError(error, 'EEXIST')) {
-      const raced = await readSourceKey(home)
-      if (raced) return raced
-    }
-    throw error
-  }
-  return key
 }
 
 async function readOptionalJson(path: string): Promise<unknown> {
@@ -244,14 +190,6 @@ function isSealedMarker(value: unknown): value is Record<string, unknown> {
     && typeof value === 'object'
     && !Array.isArray(value)
     && (value as Record<string, unknown>)['$sealed'] === 1
-}
-
-function isSealedEnvelope(value: unknown): value is SealedEnvelope {
-  if (!isSealedMarker(value)) return false
-  return typeof value['alg'] === 'string'
-    && typeof value['iv'] === 'string'
-    && typeof value['tag'] === 'string'
-    && typeof value['data'] === 'string'
 }
 
 function stringMap(value: Record<string, unknown>): Record<string, string> {

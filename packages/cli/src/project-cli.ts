@@ -1,3 +1,4 @@
+import { constants } from 'node:fs'
 import { readFile, access } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
@@ -26,7 +27,7 @@ export async function runProjectCli(argv: string[]): Promise<number> {
   const explicit = project !== undefined || home !== undefined
   if (explicit) {
     for (const key of Object.keys(env)) {
-      if (key.startsWith('OPENALICE_PROJECT_') || ['OPENALICE_PROJECT', 'OPENALICE_INSTANCE', 'OPENALICE_HOME', 'AQ_WS_ID', 'AQ_RUN_ID', 'AQ_SESSION_ID', 'OPENALICE_TOOL_URL', 'OPENALICE_TOOL_SOCKET', 'OPENALICE_MCP_URL'].includes(key)) delete env[key]
+      if (key.startsWith('OPENALICE_PROJECT_') || ['OPENALICE_PROJECT', 'OPENALICE_INSTANCE', 'OPENALICE_HOME', 'AQ_WS_ID', 'AQ_RUN_ID', 'AQ_SESSION_ID', 'OPENALICE_TOOL_URL', 'OPENALICE_TOOL_SOCKET', 'OPENALICE_MCP_URL', 'OPENALICE_LOCAL_TOKEN', 'OPENALICE_LOCAL_TOKEN_FILE'].includes(key)) delete env[key]
     }
   }
   const context = await resolveStoredLaunchContext({ ...(project ? { project } : {}), ...(home ? { home } : {}) }, { env })
@@ -43,6 +44,17 @@ export async function runProjectCli(argv: string[]): Promise<number> {
   env.OPENALICE_PROJECT_ID = context.aliceProject.id
   env.OPENALICE_HOME = context.home
   env.OPENALICE_TOOL_URL = endpoint.socket ? '/cli' : endpoint.url
+  // Never let an inherited token from another home shadow the selected
+  // project's token file; the CLI prefers the inline token.
+  delete env.OPENALICE_LOCAL_TOKEN
+  env.OPENALICE_LOCAL_TOKEN_FILE = join(context.home, 'auth', 'local.token')
+  try {
+    await access(env.OPENALICE_LOCAL_TOKEN_FILE, constants.R_OK)
+  } catch {
+    throw new Error(
+      `No local auth token in ${context.home}. Start or restart this Project with the updated OpenAlice Runtime.`,
+    )
+  }
   delete env.OPENALICE_TOOL_SOCKET
   if (endpoint.socket) env.OPENALICE_TOOL_SOCKET = endpoint.socket
   env.OPENALICE_CLI_BIN = binary

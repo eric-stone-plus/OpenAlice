@@ -314,7 +314,7 @@ export const opencodeAdapter: CliAdapter = {
       // config owns permissions, and the ACP transport already handles
       // permission prompts. The Trade agent's own permission block is scoped
       // to that agent (including the seat guard).
-      return { env, interactiveArgs, headlessArgs, webArgs: [] };
+      return { env, interactiveArgs, headlessArgs, webArgs: [], webConfigPin: { model: selectedModel, reasoningEffort, mode: OPENCODE_TRADE_AGENT_ID } };
     },
   },
 

@@ -27,7 +27,7 @@ import { getProductVersion } from '@traderalice/update-lifecycle/node'
  */
 
 import { spawn } from 'node:child_process'
-import { createDecipheriv, randomUUID } from 'node:crypto'
+import { randomUUID } from 'node:crypto'
 import { mkdir, readFile, watch } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
@@ -43,6 +43,7 @@ import {
   RestartBackoff,
   takeoverRequested,
   proxyEnvFromRules,
+  resolveGuardianTradingMode,
 } from '@traderalice/guardian-runtime'
 import {
   planProdPorts,
@@ -80,12 +81,6 @@ const GUARDIAN_CHILD_ENV = {
   ...proxyEnvFromRules('', process.env),
 }
 
-function truthyEnv(raw) {
-  if (raw === undefined || raw === '') return false
-  const normalized = String(raw).toLowerCase()
-  return normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on'
-}
-
 function resolveRuntimeProvider() {
   const explicit = process.env.OPENALICE_RUNTIME_PROVIDER?.trim()
   if (['source', 'bundle', 'bun', 'docker', 'remote'].includes(explicit)) return explicit
@@ -109,64 +104,11 @@ function pendingActivation() {
   }
 }
 
-function isLiteModeEnv(env) {
-  return truthyEnv(env.OPENALICE_LITE_MODE) || truthyEnv(env.OPENALICE_UTA_DISABLED)
-}
-
-function parseTradingModeEnv(env) {
-  const raw = String(env.OPENALICE_TRADING_MODE ?? '').trim().toLowerCase()
-  if (raw === 'lite' || raw === 'readonly' || raw === 'pro') return raw
-  return isLiteModeEnv(env) ? 'lite' : null
-}
-
-async function readPersistedTradingMode(userDataHome) {
-  try {
-    const raw = JSON.parse(await readFile(resolve(userDataHome, 'data', 'config', 'trading.json'), 'utf8'))
-    return raw.mode === 'lite' || raw.mode === 'readonly' || raw.mode === 'pro' ? raw.mode : null
-  } catch {
-    return null
-  }
-}
-
-function isSealedEnvelope(value) {
-  return (
-    typeof value === 'object' && value !== null &&
-    value.$sealed === 1 &&
-    typeof value.iv === 'string' &&
-    typeof value.tag === 'string' &&
-    typeof value.data === 'string'
-  )
-}
-
-async function unsealAccounts(userDataHome, envelope) {
-  if (envelope.alg !== 'aes-256-gcm') return []
-  const keyRaw = (await readFile(resolve(userDataHome, 'sealing.key'), 'utf8')).trim()
-  const decipher = createDecipheriv('aes-256-gcm', Buffer.from(keyRaw, 'base64'), Buffer.from(envelope.iv, 'base64'))
-  decipher.setAuthTag(Buffer.from(envelope.tag, 'base64'))
-  const plaintext = Buffer.concat([
-    decipher.update(Buffer.from(envelope.data, 'base64')),
-    decipher.final(),
-  ])
-  return JSON.parse(plaintext.toString('utf8'))
-}
-
-async function hasPersistedUTAs(userDataHome) {
-  try {
-    const raw = JSON.parse(await readFile(resolve(userDataHome, 'data', 'config', 'accounts.json'), 'utf8'))
-    const accounts = isSealedEnvelope(raw) ? await unsealAccounts(userDataHome, raw) : raw
-    return Array.isArray(accounts) && accounts.length > 0
-  } catch {
-    return false
-  }
-}
-
+// The sealing key lives in the same machine-key store as the app
+// (systemd-creds by default). The resolver is shared with the source
+// guardian so both paths read the same encrypted accounts.
 async function resolveTradingMode(env, userDataHome) {
-  const envMode = parseTradingModeEnv(env)
-  const configuredMode = await readPersistedTradingMode(userDataHome)
-  const hasUTAConfig = await hasPersistedUTAs(userDataHome)
-  if (envMode) return { mode: envMode, source: 'env', envLocked: true, hasUTAConfig }
-  if (configuredMode) return { mode: configuredMode, source: 'config', envLocked: false, hasUTAConfig }
-  return { mode: hasUTAConfig ? 'pro' : 'lite', source: 'auto', envLocked: false, hasUTAConfig }
+  return resolveGuardianTradingMode(env, userDataHome)
 }
 
 // Port precedence and collision behavior mirror scripts/guardian/shared.ts:
