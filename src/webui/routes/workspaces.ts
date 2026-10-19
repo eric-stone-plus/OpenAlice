@@ -381,7 +381,7 @@ export function createWorkspaceRoutes(
       readonly credentialSlug?: string;
       readonly model?: string;
       readonly reasoningEffort?: ModelReasoningEffort;
-      /** Runtime primary-agent mode (opencode: auto/goal), applied before the first prompt. */
+      /** Runtime primary-agent mode (opencode: trade), applied before the first prompt. */
       readonly agentMode?: string;
       /** Birth stamp when allocating a new product Session (omit when resuming). */
       readonly createdBy?: SessionCreatedBy;
@@ -568,8 +568,13 @@ export function createWorkspaceRoutes(
       if (opts.surface === 'webpi') {
         operationLease?.release();
         releaseClaim();
+        // OpenAlice pins every opencode Web Session, fresh or resumed, to the
+        // app-owned Trade profile. Auto and Goal stay in the global opencode
+        // config as the terminal's generic modes. The body field is already
+        // constrained to trade; the fallback keeps older clients pinned too.
+        const requestedAgentMode = adapter.id === 'opencode' ? (opts.agentMode ?? 'trade') : undefined;
         const snapshot = await svc.executions.web(meta, record, opts.origin, {
-          ...(opts.agentMode ? { agentMode: opts.agentMode } : {}),
+          ...(requestedAgentMode ? { agentMode: requestedAgentMode } : {}),
         });
         if (initialPrompt) await svc.web.prompt(record.id, initialPrompt);
         releaseClaim();
@@ -2025,7 +2030,7 @@ export function createWorkspaceRoutes(
     let credentialSlug: string | undefined;
     let model: string | undefined;
     let reasoningEffort: ModelReasoningEffort | undefined;
-    let agentMode: 'auto' | 'goal' | undefined;
+    let agentMode: 'trade' | undefined;
     let surface: 'terminal' | 'webpi' | undefined;
     try {
       const body = await safeJson(c);
@@ -2042,7 +2047,7 @@ export function createWorkspaceRoutes(
       if (typeof rawModel === 'string' && rawModel.trim().length > 0) model = rawModel.trim();
       const rawEffort = fields['reasoningEffort'];
       if (isModelReasoningEffort(rawEffort)) reasoningEffort = rawEffort;
-      if (fields['agentMode'] === 'auto' || fields['agentMode'] === 'goal') agentMode = fields['agentMode'];
+      if (fields['agentMode'] === 'trade') agentMode = fields['agentMode'];
       // Quick-chat seed (fresh-only): a first message the TUI opens already
       // working on. Ignored when resuming — seeding + resume is ambiguous on
       // codex's `resume <id>` / pi's `--session-id`.
@@ -2084,7 +2089,7 @@ export function createWorkspaceRoutes(
     let credentialSlug: string | undefined;
     let model: string | undefined;
     let reasoningEffort: ModelReasoningEffort | undefined;
-    let agentMode: 'auto' | 'goal' | undefined;
+    let agentMode: 'trade' | undefined;
     let targetWsId: string | undefined;
     let templateName = 'chat';
     try {
@@ -2108,7 +2113,7 @@ export function createWorkspaceRoutes(
       if (typeof rawModel === 'string' && rawModel.trim().length > 0) model = rawModel.trim();
       const rawEffort = fields['reasoningEffort'];
       if (isModelReasoningEffort(rawEffort)) reasoningEffort = rawEffort;
-      if (fields['agentMode'] === 'auto' || fields['agentMode'] === 'goal') agentMode = fields['agentMode'];
+      if (fields['agentMode'] === 'trade') agentMode = fields['agentMode'];
       // Optional: spawn into THIS existing workspace instead of today's. The
       // chat sidebar's per-workspace "+" ("Ask Alice, but in this workspace").
       const rawTarget = fields['targetWsId'];
@@ -2618,7 +2623,11 @@ export function createWorkspaceRoutes(
         meta,
         record,
         { kind: 'user', entry: runtimeSelection ? 'web-reconfigure' : 'web-open' },
-        { ...(id === svc.managerWorkspace?.id ? managerWebOptions : {}), ...(runtimeSelection ? { runtimeSelection } : {}) },
+        {
+          ...(id === svc.managerWorkspace?.id ? managerWebOptions : {}),
+          ...(adapter.id === 'opencode' ? { agentMode: 'trade' } : {}),
+          ...(runtimeSelection ? { runtimeSelection } : {}),
+        },
       );
       return c.json({ ok: true, snapshot, session: publicSession(record) });
     } catch (err) {
@@ -2741,8 +2750,8 @@ export function createWorkspaceRoutes(
     }
   });
 
-  // Change the Auto/Goal session mode on a live Web session. OpenAlice pins
-  // the model and effort, so this endpoint admits only mode=auto|goal; the
+  // Change the Trade session mode on a live Web session. OpenAlice pins
+  // the model and effort, so this endpoint admits only mode=trade; the
   // transport re-validates the value against the options the runtime itself
   // advertised.
   app.post('/:id/sessions/:sid/web/config', async (c) => {
@@ -2755,8 +2764,8 @@ export function createWorkspaceRoutes(
     if (typeof configId !== 'string' || !configId || typeof value !== 'string' || !value) {
       return c.json({ error: 'bad_request', message: 'configId and value are required' }, 400);
     }
-    if (configId !== 'mode' || (value !== 'auto' && value !== 'goal')) {
-      return c.json({ error: 'bad_request', message: 'only the Auto/Goal session mode is configurable' }, 400);
+    if (configId !== 'mode' || value !== 'trade') {
+      return c.json({ error: 'bad_request', message: 'only the Trade session mode is configurable' }, 400);
     }
     try {
       const snapshot = await svc.web.configure(ctx.token, configId, value);

@@ -720,7 +720,7 @@ namespaces that many remote containers cannot create.
 | Grok | `--always-approve`, `--sandbox off` |
 | Antigravity | `--dangerously-skip-permissions`; no sandbox opt-in |
 | Oh My Pi | `--auto-approve` on all surfaces |
-| opencode | Process-local `OPENCODE_CONFIG_CONTENT` with `permission: "allow"` |
+| opencode | Process-local `OPENCODE_CONFIG_CONTENT` with the app-owned Trade agent (`deepseek/deepseek-flash`, variant `max`); no top-level permission override, and the agent's permission block mirrors the seat's auto/goal policy |
 | Pi | Native tools have no per-tool sandbox/approval; existing Workspace resource trust bootstrap applies |
 
 Do not implement this by rewriting global user configuration. Native runtime

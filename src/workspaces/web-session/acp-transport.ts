@@ -75,14 +75,18 @@ export class AcpTransport implements WebSessionTransport {
     }
     this.ctx.state.setNativeSessionId(this.sessionId)
     // Only apply the OpenAlice mode when the runtime actually advertises it.
-    // Cursor/Grok ACP sessions expose model/effort but no mode option; sending
-    // one anyway would fail session startup with an unknown-config-option error.
+    // The app passes a mode only for opencode, whose overlay always adds the
+    // Trade profile; a missing mode means the app-owned pin failed, so fail
+    // loudly instead of silently running the terminal's auto/goal default.
     const requestedMode = this.ctx.input.agentMode
     const modeOffered = requestedMode
       ? this.ctx.state.configOptions.some((option) => option.id === 'mode'
         && option.options.some((entry) => entry.value === requestedMode))
       : false
-    if (requestedMode && modeOffered) await this.configure('mode', requestedMode)
+    if (requestedMode && !modeOffered) {
+      throw new Error(`${this.ctx.input.agent} did not offer the requested ${requestedMode} session mode`)
+    }
+    if (requestedMode) await this.configure('mode', requestedMode)
     this.ctx.state.setPhase('idle')
   }
 

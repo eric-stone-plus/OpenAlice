@@ -231,7 +231,7 @@ export function HarnessLandingPage({
     managedWorkspaceLaunch: mode === 'chat' && credentialWorkspace !== null && credentialWorkspace !== undefined,
   })
   const effectiveAgent = launchConfig.effectiveAgent
-  const [agentMode, setAgentMode] = useState<'auto' | 'goal'>('auto')
+  const agentMode = 'trade' as const
   const selectedInfo = launchConfig.selectedAgent
   const supportsGui = Boolean(selectedInfo?.capabilities.web?.freshSession)
   // OpenAlice is GUI-only. The terminal fallback exists solely for a runtime
@@ -287,9 +287,9 @@ export function HarnessLandingPage({
         launchConfig.launchCredentialSlug,
         effectiveTargetWorkspaceId,
         templateName,
-        // Model and effort are pinned by the opencode Auto/Goal agent configs
+        // Model and effort are pinned by the app-owned Trade profile
         // (deepseek/deepseek-flash at max effort). The launch composer no
-        // longer exposes either control.
+        // longer exposes either control, and Auto/Goal stay in the terminal.
         undefined,
         undefined,
         launchConfig.accessMode === 'native' ? 'native' : undefined,
@@ -364,7 +364,6 @@ export function HarnessLandingPage({
               <SessionModeSelect
                 value={agentMode}
                 disabled={launching}
-                onChange={(next) => setAgentMode(next === 'goal' ? 'goal' : 'auto')}
               />
             </fieldset>
           }

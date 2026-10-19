@@ -27,7 +27,7 @@ export interface StartWebSessionInput {
   readonly model?: string
   readonly reasoningEffort?: string
   /**
-   * Runtime session mode (for opencode: the primary agent id, e.g. auto/goal).
+   * Runtime session mode (for opencode: the primary agent id, e.g. trade/auto/goal).
    * Applied after session/new or session/load and before the first prompt.
    */
   readonly agentMode?: string

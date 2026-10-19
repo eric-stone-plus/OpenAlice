@@ -238,8 +238,8 @@ export function ActivityBar({
                           }`}
                         >
                           {isActive && <SelectionIndicator />}
-                          <span className={`oa-nav-icon relative flex h-[18px] w-[18px] shrink-0 items-center justify-center ${denseRail ? 'md:h-3.5 md:w-3.5' : ''}`}>
-                            <Icon size={denseRail ? 14 : 15} strokeWidth={1.75} />
+                          <span className={`oa-nav-icon relative flex h-5 w-5 shrink-0 items-center justify-center ${denseRail ? 'md:h-4 md:w-4' : ''}`}>
+                            <Icon size={denseRail ? 16 : 18} strokeWidth={1.75} />
                           </span>
                           <span className={`flex-1 truncate ${compactRail ? 'md:hidden' : ''}`}>{label}</span>
                           {badge !== null && (

@@ -5,9 +5,9 @@ import { SessionModeSelect } from './SessionModeSelect'
 
 /**
  * Composer for a live GUI conversation. Model and effort are intentionally
- * absent: both Auto and Goal are opencode primary agents pinned to
- * deepseek-flash at max effort. Only runtimes that advertise a mode select get
- * the experimental Auto/Goal switch.
+ * absent: Trade is the only primary-agent mode OpenAlice exposes, pinned to
+ * deepseek-flash at max effort. Auto and Goal stay in the global opencode
+ * config as the terminal's generic modes.
  */
 export function WebSessionComposer(props: {
   composer: ChatComposerProps
@@ -18,20 +18,25 @@ export function WebSessionComposer(props: {
   const mode = props.configOptions?.find((option) => option.id === 'mode')
   const options = mode
     ? mode.options
-        .filter((option) => option.value === 'auto' || option.value === 'goal')
+        .filter((option) => option.value === 'trade')
         .map((option) => ({
           value: option.value,
           label: option.name,
           ...(option.description ? { description: option.description } : {}),
         }))
     : []
-  if (options.length === 0) return <ChatComposer {...props.composer} />
+  // Pre-Trade sessions may still run the generic Auto/Goal agents; they keep
+  // that mode and show no switch. A fresh OpenAlice workspace Session is Trade,
+  // and that is the only mode this control offers.
+  if (!mode || mode.currentValue !== 'trade' || options.length === 0) {
+    return <ChatComposer {...props.composer} />
+  }
   return (
     <ChatComposer
       {...props.composer}
       controls={(
         <SessionModeSelect
-          value={mode?.currentValue ?? 'auto'}
+          value={mode.currentValue}
           options={options}
           disabled={props.busy}
           onChange={(value) => {

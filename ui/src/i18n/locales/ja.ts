@@ -277,7 +277,7 @@ export const ja: Resources = {
   nav: {
     projects: 'プロジェクト',
     quickStart: 'Quick Start',
-    generalChat: 'Chat',
+    generalChat: 'Trade',
     harnessLabel: '{{name}} Harness',
     item: {
       inbox: '受信トレイ',

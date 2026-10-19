@@ -578,7 +578,7 @@ describe('ChatLandingPage keyboard submission', () => {
       undefined,
       'native',
       'terminal',
-      'auto',
+      'trade',
     ))
   })
 
@@ -649,7 +649,7 @@ describe('ChatLandingPage keyboard submission', () => {
       undefined,
       'native',
       'terminal',
-      'auto',
+      'trade',
     ))
     expect(mocks.probeAgentRuntimeReadiness).not.toHaveBeenCalled()
     expect(screen.queryByText('The runtime reported an error: 429: balance exhausted')).toBeNull()
@@ -688,7 +688,7 @@ describe('ChatLandingPage keyboard submission', () => {
     render(<ChatLandingPage spec={{ params: { targetWsId: 'chat-1' } }} />)
 
     const mode = await screen.findByRole('button', { name: 'Session mode' })
-    expect(mode.textContent).toContain('Auto')
+    expect(mode.textContent).toContain('Trade')
     expect(screen.queryByText('Default model')).toBeNull()
     expect(screen.queryByText('Default effort')).toBeNull()
 
@@ -705,7 +705,7 @@ describe('ChatLandingPage keyboard submission', () => {
       undefined,
       'native',
       'terminal',
-      'auto',
+      'trade',
     ))
   })
 
@@ -728,13 +728,13 @@ describe('ChatLandingPage keyboard submission', () => {
       undefined,
       'native',
       'terminal',
-      'auto',
+      'trade',
     ))
   })
 })
 
-// The landing composer now uses the runtime account and the Auto/Goal mode
-// only. AI source selection lives in Settings, so these landing-level cases
+// The landing composer now uses the runtime account and the Trade mode only.
+// AI source selection lives in Settings, so these landing-level cases
 // are kept as a reference for the removed surface rather than exercised here.
 describe.skip('ChatLandingPage AI source disclosure', () => {
   it('can explicitly use the runtime account without reading the Workspace AI source', async () => {
@@ -778,7 +778,7 @@ describe.skip('ChatLandingPage AI source disclosure', () => {
       undefined,
       'native',
       'terminal',
-      'auto',
+      'trade',
     ))
   })
 
@@ -916,7 +916,7 @@ describe.skip('ChatLandingPage AI source disclosure', () => {
       undefined,
       'native',
       'terminal',
-      'auto',
+      'trade',
     ))
   })
 
@@ -1031,7 +1031,7 @@ describe('Workspace embedded composer', () => {
     await waitFor(() => expect(mocks.quickChat).toHaveBeenCalledWith(
       'Inspect existing research', 'opencode', undefined, target.id, 'auto-quant-v2', undefined, undefined, undefined,
       'terminal',
-      'auto',
+      'trade',
     ))
   })
 })

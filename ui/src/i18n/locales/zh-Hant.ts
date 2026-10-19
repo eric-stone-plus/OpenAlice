@@ -285,7 +285,7 @@ export const zhHant: Resources = {
   nav: {
     projects: '專案',
     quickStart: 'Quick Start',
-    generalChat: 'Chat',
+    generalChat: 'Trade',
     harnessLabel: '{{name}} Harness',
     item: {
       inbox: '收件匣',

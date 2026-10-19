@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { ResolvedSessionRuntimeBinding } from '../cli-adapter.js';
 import { opencodeAdapter } from './opencode.js';
+import { OPENCODE_TRADE_AGENT } from './opencode-trade-agent.js';
 
 const runtime: ResolvedSessionRuntimeBinding = {
   binding: {
@@ -17,6 +18,13 @@ const runtime: ResolvedSessionRuntimeBinding = {
 };
 
 describe('opencode runtime flags', () => {
+  it('pins the app-owned Trade profile to deepseek-flash at max effort', () => {
+    // opencode resolves an agent variant only when the agent names a model;
+    // the pair is what makes `variant: max` reach the provider.
+    expect(OPENCODE_TRADE_AGENT.model).toBe('deepseek/deepseek-flash');
+    expect(OPENCODE_TRADE_AGENT.variant).toBe('max');
+  });
+
   it('keeps run-only --variant off the interactive and web launch surfaces', () => {
     const projected = opencodeAdapter.sessionRuntime!.project(
       { cwd: '/workspace', env: {} },
@@ -25,10 +33,15 @@ describe('opencode runtime flags', () => {
 
     expect(projected.interactiveArgs).toEqual(['--model', 'openai/gpt-5.6-sol']);
     expect(projected.webArgs).toEqual([]);
-    expect(JSON.parse(projected.env['OPENCODE_CONFIG_CONTENT']!)).toEqual({ model: 'openai/gpt-5.6-sol' });
+    expect(JSON.parse(projected.env['OPENCODE_CONFIG_CONTENT']!)).toEqual({
+      default_agent: 'trade',
+      agent: { trade: OPENCODE_TRADE_AGENT },
+      model: 'openai/gpt-5.6-sol',
+    });
     expect(projected.headlessArgs).toEqual([
       '--model', 'openai/gpt-5.6-sol',
       '--variant', 'high',
+      '--agent', 'trade',
     ]);
 
     expect(opencodeAdapter.composeCommand([], {
@@ -43,12 +56,22 @@ describe('opencode runtime flags', () => {
       env: {},
       sessionRuntime: projected,
     }, 'hello')).toContain('--variant');
+    expect(opencodeAdapter.composeHeadlessCommand!([], {
+      cwd: '/workspace',
+      env: {},
+      sessionRuntime: projected,
+    }, 'hello')).toContain('--agent');
   });
 });
 
 it('preserves process config while selecting the ACP model without unsupported flags', () => {
   const projected = opencodeAdapter.sessionRuntime!.project({ cwd: '/workspace', env: { OPENCODE_CONFIG_CONTENT: '{"theme":"system"}' } }, runtime);
-  expect(JSON.parse(projected.env['OPENCODE_CONFIG_CONTENT']!)).toEqual({ theme: 'system', model: 'openai/gpt-5.6-sol' });
+  expect(JSON.parse(projected.env['OPENCODE_CONFIG_CONTENT']!)).toEqual({
+    theme: 'system',
+    default_agent: 'trade',
+    agent: { trade: OPENCODE_TRADE_AGENT },
+    model: 'openai/gpt-5.6-sol',
+  });
   expect(opencodeAdapter.composeWebCommand!([], { cwd: '/workspace', env: projected.env, sessionRuntime: projected })).toEqual(['opencode', 'acp']);
 });
 
@@ -57,9 +80,16 @@ it('does not inject a permission override without a model override', () => {
     { cwd: '/workspace', env: { OPENCODE_CONFIG_CONTENT: '{"theme":"system","permission":"ask"}' } },
     { binding: { version: 1, credential: { source: 'native' } }, ai: null },
   );
-  // No app-specific config is projected; the process/terminal config survives
-  // unchanged through the inherited spawn environment.
-  expect(projected.env['OPENCODE_CONFIG_CONTENT']).toBeUndefined();
+  // The inherited process/terminal config survives, the Trade profile is
+  // added, and no top-level permission override is injected.
+  const config = JSON.parse(projected.env['OPENCODE_CONFIG_CONTENT']!);
+  expect(config).toEqual({
+    theme: 'system',
+    permission: 'ask',
+    default_agent: 'trade',
+    agent: { trade: OPENCODE_TRADE_AGENT },
+  });
+  expect(config.permission).toBe('ask');
 });
 
 it('matches the terminal wrapper environment and leaves auto-update enabled', () => {

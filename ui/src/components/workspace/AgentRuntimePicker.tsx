@@ -231,9 +231,9 @@ export const AgentRuntimePicker = forwardRef<AgentRuntimePickerHandle, AgentRunt
               className={`oa-pressable inline-flex min-h-7 min-w-0 max-w-[190px] items-center gap-1.5 rounded-md py-1 text-[12px] leading-[18px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 ${toolbar ? 'bg-transparent px-2' : 'bg-muted px-2.5'}`}
             />}
           >
-            <AgentRuntimeIcon agentId={selected?.id} className="h-3.5 w-3.5 shrink-0" />
+            <AgentRuntimeIcon agentId={selected?.id} className="h-4 w-4 shrink-0" />
             <span className="truncate">{selected?.displayName ?? t('chatLanding.selectAgent')}</span>
-            <ChevronDown className="h-3 w-3 shrink-0 opacity-60" />
+            <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-60" />
           </DropdownMenuTrigger>
           <DropdownMenuContent
             align="start"

@@ -1812,11 +1812,16 @@ describe('Web surface routes', () => {
     expect(invalid.status).toBe(400);
   });
 
-  it('applies only the Auto/Goal mode to a live Web session', async () => {
+  it('applies only the Trade mode to a live Web session', async () => {
     const { app, web } = buildWeb();
-    const ok = await post(app, `/ws-1/sessions/${TOKEN}/web/config`, { configId: 'mode', value: 'goal' });
+    const goal = await post(app, `/ws-1/sessions/${TOKEN}/web/config`, { configId: 'mode', value: 'goal' });
+    expect(goal.status).toBe(400);
+    const auto = await post(app, `/ws-1/sessions/${TOKEN}/web/config`, { configId: 'mode', value: 'auto' });
+    expect(auto.status).toBe(400);
+
+    const ok = await post(app, `/ws-1/sessions/${TOKEN}/web/config`, { configId: 'mode', value: 'trade' });
     expect(ok.status).toBe(200);
-    expect(web.configure).toHaveBeenCalledWith(TOKEN, 'mode', 'goal');
+    expect(web.configure).toHaveBeenCalledWith(TOKEN, 'mode', 'trade');
 
     const effort = await post(app, `/ws-1/sessions/${TOKEN}/web/config`, { configId: 'effort', value: 'none' });
     expect(effort.status).toBe(400);

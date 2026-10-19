@@ -176,10 +176,10 @@ Web shutdown waits for child termination, including the SIGKILL fallback, before
 another writer may start. The UI renders background occupancy without attaching
 a terminal to a headless Session.
 
-Quick Start exposes only the runtime picker and the experimental Auto/Goal mode
-selector. GUI is required for opencode (`web.freshSession`); `quick-chat` starts
-the structured host directly with the same Session runtime binding. The desktop
-no longer offers a TUI surface. The initial prompt is sent once after Web startup.
+Quick Start exposes only the runtime picker and the Trade mode selector. GUI is
+required for opencode (`web.freshSession`); `quick-chat` starts the structured
+host directly with the same Session runtime binding. The desktop no longer
+offers a TUI surface. The initial prompt is sent once after Web startup.
 
 ## File references in GUI prose
 
@@ -231,12 +231,13 @@ text growth only while the reader remains near the bottom.
 ### Shared Start and GUI composer
 
 `ChatComposer` owns the common input/actions. Start supplies the runtime picker
-and the Auto/Goal mode selector in the controls row and follows the sidebar
+and the Trade mode selector in the controls row and follows the sidebar
 Workspace target; it has no Workspace picker. Model and effort are fixed
 (deepseek-flash at max effort) and are not exposed in the composer. GUI shows
 its fixed runtime identity in the top bar, without a composer context tray. The
-mode selector appears only when the runtime advertises an Auto/Goal select; a
-live `POST /web/config` request is limited to `mode=auto|goal`.
+mode selector appears only when the runtime advertises a Trade select; a
+live `POST /web/config` request is limited to `mode=trade`. Auto and Goal remain
+the terminal's generic opencode modes and never appear in the app.
 Sending and configuration are locked during restart; the mounted composer keeps
 its draft and transcript. `useWebConversation` invalidates in-flight polls and
 accepts the restarted process's new revision sequence. No persisted shape changes.

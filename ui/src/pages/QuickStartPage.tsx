@@ -1,14 +1,14 @@
 import { ProjectWorkspaceSetupNotice } from '../components/ProjectWorkspaceSetupNotice'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Binary, ChevronDown, MessageSquare, Microscope } from 'lucide-react'
+import { Binary, ChevronDown, Microscope, TrendingUp } from 'lucide-react'
 import { PageContentLayout, PageTopBar } from '../components/PageTopBar'
 import { Button } from '../components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from '../components/ui/dropdown-menu'
 import { AutoPredictionLandingPage, AutoQuantLandingPage, ChatLandingPage } from './ChatLandingPage'
 
 const HARNESS_CHOICES = [
-  { id: 'chat', label: 'nav.generalChat', Icon: MessageSquare, Page: ChatLandingPage },
+  { id: 'chat', label: 'nav.generalChat', Icon: TrendingUp, Page: ChatLandingPage },
   { id: 'auto-quant', label: 'nav.item.autoQuant', Icon: Microscope, Page: AutoQuantLandingPage },
   { id: 'prediction', label: 'nav.item.autoPrediction', Icon: Binary, Page: AutoPredictionLandingPage },
 ] as const

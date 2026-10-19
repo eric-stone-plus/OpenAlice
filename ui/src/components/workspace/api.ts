@@ -940,8 +940,8 @@ export interface SpawnOptions {
   readonly initialPrompt?: string;
   /** Interactive launch surface. GUI-only OpenAlice sends `webpi`. */
   readonly surface?: 'terminal' | 'webpi';
-  /** Runtime primary-agent mode (opencode: auto/goal). */
-  readonly agentMode?: 'auto' | 'goal';
+  /** Runtime primary-agent mode (opencode: trade). */
+  readonly agentMode?: 'trade';
 }
 
 /** Secret-free product-Session birth stamp (mirrors backend SessionCreatedBy). */
@@ -1320,7 +1320,7 @@ export async function quickChat(
   reasoningEffort?: ModelReasoningEffort,
   credentialSource?: 'native',
   surface?: 'terminal' | 'webpi',
-  agentMode?: 'auto' | 'goal',
+  agentMode?: 'trade',
 ): Promise<QuickChatResult> {
   const body: Record<string, unknown> = { prompt };
   if (surface) body['surface'] = surface;

@@ -451,7 +451,7 @@ export function WorkspacesProvider({ children, renderContent }: { children: Reac
       reasoningEffort?: import('../api').ModelReasoningEffort,
       credentialSource?: 'native',
       surface?: 'terminal' | 'webpi',
-      agentMode?: 'auto' | 'goal',
+      agentMode?: 'trade',
     ): Promise<string> => {
       await ensureTerminalAppearancePublished()
       const { workspace, session } = await apiQuickChat(

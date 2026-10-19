@@ -19,6 +19,7 @@ import {
 import { readWorkspaceFile, writeWorkspaceFile } from '../file-service.js';
 import type { HeadlessOutputEvent } from '../headless-output.js';
 import { resetOwnedJsonConfig, writeOwnedJsonConfig } from './owned-json-config.js';
+import { OPENCODE_TRADE_AGENT, OPENCODE_TRADE_AGENT_ID } from './opencode-trade-agent.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -242,9 +243,12 @@ export async function syncOpenCodeWorkspaceTheme(cwd: string): Promise<boolean> 
  *
  *   - Tool access: OpenAlice tools are exposed through the injected
  *     `alice*` / `traderhub` CLI shims, not opencode's native MCP config.
- *     We intentionally do not set `OPENCODE_CONFIG_CONTENT`: leaving opencode's
- *     native config surface alone avoids hidden app-mode ports and keeps the
- *     workspace tooling path identical to pi/shell/headless CLI usage.
+ *     The adapter projects one process-local `OPENCODE_CONFIG_CONTENT`
+ *     overlay: OpenAlice's app-owned Trade profile (opencode-trade-agent.ts).
+ *     The global config, providers, auth, and the terminal's generic
+ *     auto/goal default stay intact; no top-level permission override is
+ *     added, so the terminal and the app still run the same opencode build
+ *     and configuration surface.
  *
  *   - Provider override: `opencode.json` `provider.<name>` with a custom
  *     `baseURL` + `apiKey` + a top-level default `model = "<provider>/<id>"`.
@@ -333,29 +337,62 @@ export const opencodeAdapter: CliAdapter = {
         ...(runtime.binding.reasoningEffort
           ? ['--variant', runtime.binding.reasoningEffort]
           : []),
+        // Scheduled/issue runs are OpenAlice work: select the same app-owned
+        // Trade profile the GUI defaults to. The profile tells headless runs
+        // to recommend and report, never to execute an order without approval.
+        '--agent', OPENCODE_TRADE_AGENT_ID,
       ];
       const env: Record<string, string> = {};
+      // The app-owned Trade profile is a process-local overlay, not a rewrite
+      // of the shared opencode config. OPENCODE_CONFIG_CONTENT merges over the
+      // global config (verified against the installed opencode ACP server:
+      // model, effort, and the auto/goal agents survive), so the terminal keeps
+      // its generic default while OpenAlice sessions can select Trade.
+      const inheritedRaw = _ctx.env['OPENCODE_CONFIG_CONTENT'];
+      let inherited: Record<string, unknown> = {};
+      if (inheritedRaw) {
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(inheritedRaw);
+        } catch (err) {
+          throw new Error(`OPENCODE_CONFIG_CONTENT must contain valid JSON: ${(err as Error).message}`);
+        }
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+          throw new Error('OPENCODE_CONFIG_CONTENT must contain a JSON object');
+        }
+        inherited = parsed as Record<string, unknown>;
+      }
+      const inheritedAgents = inherited['agent'];
+      const inheritedProvider = inherited['provider'];
+      const overlay: Record<string, unknown> = {
+        ...inherited,
+        // App-spawned TUIs have no `--agent` flag; the default agent makes the
+        // bare TUI open Trade while the terminal's global config keeps its own
+        // default. Web and headless select Trade explicitly.
+        default_agent: OPENCODE_TRADE_AGENT_ID,
+        agent: {
+          ...(inheritedAgents && typeof inheritedAgents === 'object' && !Array.isArray(inheritedAgents)
+            ? inheritedAgents as Record<string, unknown>
+            : {}),
+          [OPENCODE_TRADE_AGENT_ID]: OPENCODE_TRADE_AGENT,
+        },
+      };
       if (ai && (ai.apiKey || ai.baseUrl)) {
-        env['OPENCODE_CONFIG_CONTENT'] = JSON.stringify({
-          provider: {
-            [OPENCODE_SESSION_PROVIDER_NAME]: openCodeProvider(ai, 'OpenAlice Session provider'),
-          },
-          ...(selectedModel ? { model: selectedModel } : {}),
-        });
+        overlay['provider'] = {
+          ...(inheritedProvider && typeof inheritedProvider === 'object' && !Array.isArray(inheritedProvider)
+            ? inheritedProvider as Record<string, unknown>
+            : {}),
+          [OPENCODE_SESSION_PROVIDER_NAME]: openCodeProvider(ai, 'OpenAlice Session provider'),
+        };
       }
       // ACP has no --model flag. Its native config selects the default model
       // for session/new; keep this process-local and preserve other settings.
-      if (selectedModel && !env['OPENCODE_CONFIG_CONTENT']) {
-        const raw = _ctx.env['OPENCODE_CONFIG_CONTENT'];
-        const inherited: unknown = raw ? JSON.parse(raw) : {};
-        if (!inherited || typeof inherited !== 'object' || Array.isArray(inherited)) {
-          throw new Error('OPENCODE_CONFIG_CONTENT must contain a JSON object');
-        }
-        env['OPENCODE_CONFIG_CONTENT'] = JSON.stringify({ ...inherited, model: selectedModel });
-      }
-      // Do not add a permission override: the terminal's opencode config owns
-      // permissions, and the ACP transport already handles permission prompts.
-      // Only the app-specific provider/model projection is added above.
+      if (selectedModel) overlay['model'] = selectedModel;
+      env['OPENCODE_CONFIG_CONTENT'] = JSON.stringify(overlay);
+      // Do not add a top-level permission override: the terminal's opencode
+      // config owns permissions, and the ACP transport already handles
+      // permission prompts. The Trade agent's own permission block is scoped
+      // to that agent (including the seat guard).
       return { env, interactiveArgs, headlessArgs, webArgs: [] };
     },
   },

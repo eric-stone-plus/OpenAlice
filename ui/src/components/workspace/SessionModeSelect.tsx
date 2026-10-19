@@ -18,19 +18,17 @@ export interface SessionModeOption {
 }
 
 export const SESSION_MODE_OPTIONS: readonly SessionModeOption[] = [
-  { value: 'auto', label: 'Auto', description: 'Fast, direct execution' },
-  { value: 'goal', label: 'Goal', description: 'Delivery closure with the swarm playbook' },
+  { value: 'trade', label: 'Trade', description: 'Trading desk: evidence-first research, explicit approval before orders' },
 ]
 
 const MODE_DOT: Readonly<Record<string, string>> = {
-  auto: 'bg-primary',
-  goal: 'bg-destructive',
+  trade: 'bg-success',
 }
 
 /**
- * Experimental Auto/Goal switch. Auto and Goal are opencode primary agents;
- * both pin deepseek-flash at max effort, so the composer never exposes model
- * or effort separately.
+ * Trade is the only primary-agent mode OpenAlice exposes. The app-owned Trade
+ * profile pins deepseek-flash at max effort; Auto and Goal stay in the global
+ * opencode config as the terminal's generic modes and never appear here.
  */
 export function SessionModeSelect({ value, options = SESSION_MODE_OPTIONS, disabled, onChange }: {
   readonly value: string
@@ -46,10 +44,10 @@ export function SessionModeSelect({ value, options = SESSION_MODE_OPTIONS, disab
         render={<Button variant="ghost" size="sm" disabled={disabled} className="h-7 gap-1.5 px-2 text-[12px]" />}
         aria-label={t('sessionMode.label', { defaultValue: 'Session mode' })}
       >
-        <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${MODE_DOT[active?.value ?? ''] ?? 'bg-muted-foreground'}`} aria-hidden />
+        <span className={`h-2 w-2 shrink-0 rounded-full ${MODE_DOT[active?.value ?? ''] ?? 'bg-muted-foreground'}`} aria-hidden />
         <span>{active?.label ?? value}</span>
-        <FlaskConical size={11} className="text-muted-foreground/70" aria-hidden />
-        <ChevronDown size={13} aria-hidden />
+        <FlaskConical size={13} className="text-muted-foreground/70" aria-hidden />
+        <ChevronDown size={14} aria-hidden />
       </DropdownMenuTrigger>
       <DropdownMenuContent side="top" align="start" className="w-64">
         <DropdownMenuRadioGroup value={value} onValueChange={(next) => onChange?.(next)}>
@@ -65,7 +63,7 @@ export function SessionModeSelect({ value, options = SESSION_MODE_OPTIONS, disab
             <DropdownMenuRadioItem key={option.value} value={option.value} closeOnClick className="min-h-9 px-2.5 pr-8">
               <span className="flex min-w-0 flex-col">
                 <span className="flex items-center gap-1.5 text-[12px]">
-                  <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${MODE_DOT[option.value] ?? 'bg-muted-foreground'}`} aria-hidden />
+                  <span className={`h-2 w-2 shrink-0 rounded-full ${MODE_DOT[option.value] ?? 'bg-muted-foreground'}`} aria-hidden />
                   {option.label}
                 </span>
                 {option.description && <span className="truncate text-[10px] text-muted-foreground">{option.description}</span>}
