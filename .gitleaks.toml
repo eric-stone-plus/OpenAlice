@@ -1,0 +1,69 @@
+# OpenAlice secret scanning. CI and the optional pre-commit hook both use this
+# file. Default gitleaks rules cover provider tokens (OpenAI, Anthropic, AWS,
+# GitHub, private keys); the custom rules catch generic broker assignments
+# whose vendor format is not distinctive enough for a built-in rule.
+title = "OpenAlice"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "openalice-credential-assignment"
+description = "Quoted credential assignment in a config or workspace file"
+regex = '''(?i)(?:api[_-]?key|api[_-]?secret|secret[_-]?key|passphrase|private[_-]?key|password)\s*[:=]\s*["'][A-Za-z0-9+/=_.\-]{20,}["']'''
+tags = ["credential", "openalice"]
+
+[[rules]]
+id = "openalice-env-credential-assignment"
+description = "Unquoted credential assignment in an env file"
+path = '''(^|/)(?:\.env(?:\.[^/]*)?|[^/]*\.env)$'''
+regex = '''(?i)^\s*(?:export\s+)?(?:api[_-]?key|api[_-]?secret|secret[_-]?key|passphrase|private[_-]?key|password)\s*=\s*[A-Za-z0-9+/=_.\-]{20,}\s*$'''
+tags = ["credential", "openalice"]
+
+[[rules]]
+id = "openalice-config-credential-assignment"
+description = "Unquoted credential assignment in YAML or TOML"
+path = '''(^|/)[^/]+\.(?:ya?ml|toml)$'''
+regex = '''(?i)^\s*(?:api[_-]?key|api[_-]?secret|secret[_-]?key|passphrase|private[_-]?key|password)\s*[:=]\s*[A-Za-z0-9+/=_.\-]{20,}\s*$'''
+tags = ["credential", "openalice"]
+
+[allowlist]
+description = "Synthetic fixtures and placeholder env files"
+paths = [
+  '''(^|/)\.env\.(?:example|sample|template)$''',
+]
+regexes = [
+  '''OPENALICE_FIXTURE_[A-Za-z0-9_]+''',
+  '''oa_test_ok''',
+  '''sk-secret-source''',
+  '''sk-stream-secret''',
+  '''legacy-stream-secret''',
+  '''fmp-stream-secret''',
+  '''stored-fmp''',
+  '''stored-fred''',
+  '''okx-key''',
+  '''okx-secret''',
+  '''secret-fmp''',
+  '''secret-finnhub''',
+  '''snapshot-sentinel''',
+  '''broker-stream-secret''',
+  '''connector-stream-secret-value''',
+  '''backup-only-secret-canary''',
+  '''web-session-secret-canary''',
+  '''derived-secret-canary''',
+  # Existing fixtures that match the custom rule.
+  '''workspace-secret-that-must-not-be-read''',
+  '''cursor-dashboard-key''',
+  '''sentinel-not-a-real-key''',
+  '''workspace-key-added-after-session-creation''',
+  '''broker-transfer-secret''',
+  '''native-agent-secret-canary''',
+  '''demo-openai-key-not-secret''',
+  '''demo-minimax-key-not-secret''',
+  '''sk-live-abcdefghijklmnopqrstuvwxyz''',
+  '''0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d''',
+  '''synthetic-ai-transfer-secret''',
+  '''synthetic-broker-transfer-key''',
+  '''synthetic-broker-transfer-secret''',
+  '''super-secret-password-value''',
+]

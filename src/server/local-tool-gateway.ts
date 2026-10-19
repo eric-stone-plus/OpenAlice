@@ -10,7 +10,6 @@
  */
 
 import { Hono } from 'hono'
-import { cors } from 'hono/cors'
 import { serve } from '@hono/node-server'
 import type { Plugin, EngineContext } from '../core/types.js'
 import type { ToolCenter } from '../core/tool-center.js'
@@ -43,11 +42,6 @@ export class LocalToolGatewayPlugin implements Plugin {
 
   async start(_ctx: EngineContext) {
     const app = new Hono()
-    app.use('*', cors({
-      origin: '*',
-      allowMethods: ['GET', 'POST', 'OPTIONS'],
-      allowHeaders: ['Content-Type', 'x-openalice-run', 'x-openalice-session'],
-    }))
     mountLocalToolGateway(app, this.deps)
     this.server = serve({ fetch: app.fetch, port: this.port, hostname: '127.0.0.1' }, (info) => {
       console.log(`local tool gateway listening on http://127.0.0.1:${info.port}/cli`)

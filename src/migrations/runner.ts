@@ -13,13 +13,14 @@
  * time (warning UI is out of scope for the framework).
  */
 
-import { readFile, writeFile, mkdir, unlink, cp } from 'node:fs/promises'
+import { readFile, writeFile, mkdir, unlink, cp, chmod } from 'node:fs/promises'
 import { readFileSync } from 'node:fs'
-import { resolve, dirname, join } from 'node:path'
+import { basename, resolve, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Migration, MigrationContext, ConfigMeta } from './types.js'
 import { REGISTRY } from './registry.js'
 import { dataPath, userDataHome } from '@/core/paths.js'
+import { SECRET_SNAPSHOT_EXCLUDES } from '@/core/secret-files.js'
 
 const CONFIG_DIR = dataPath('config')
 const BACKUP_DIR = dataPath('_backup')
@@ -99,13 +100,27 @@ async function writeMeta(ctx: MigrationContext, meta: ConfigMeta): Promise<void>
 
 // ==================== Snapshot ====================
 
+/** Snapshot filter: secret-bearing files are never copied in plaintext. */
+export function shouldSnapshotConfigFile(src: string): boolean {
+  return !SECRET_SNAPSHOT_EXCLUDES.has(basename(src))
+}
+
 /** Copy data/config/ to data/_backup/{ts}-{label}/config/. Returns path or null if config dir doesn't exist. */
 async function defaultSnapshot(label: string): Promise<string | null> {
   const ts = new Date().toISOString().replace(/[:.]/g, '-')
   const target = resolve(BACKUP_DIR, `${ts}-${label}`, 'config')
   try {
-    await mkdir(dirname(target), { recursive: true })
-    await cp(CONFIG_DIR, target, { recursive: true, errorOnExist: false })
+    await mkdir(dirname(target), { recursive: true, mode: 0o700 })
+    await chmod(BACKUP_DIR, 0o700).catch(() => { /* platform without chmod */ })
+    await cp(CONFIG_DIR, target, {
+      recursive: true,
+      errorOnExist: false,
+      // A snapshot exists to recover a failed migration, not to keep a second
+      // plaintext copy of credentials. Sealed files are excluded too: the live
+      // file is the source of truth, and a snapshot cannot be unsealed without
+      // the machine key anyway.
+      filter: shouldSnapshotConfigFile,
+    })
     return target
   } catch (err: unknown) {
     if (isENOENT(err)) return null

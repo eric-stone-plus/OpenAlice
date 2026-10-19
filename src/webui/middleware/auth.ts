@@ -79,7 +79,7 @@ export function createAuthMiddleware(opts: AuthMiddlewareOptions): MiddlewareHan
     if (trustedProxies.size === 0) {
       const clientIp = getSocketRemoteAddress(c)
       const origin = c.req.header('origin')
-      if (clientIp && isLoopbackIp(clientIp) && (!origin || isTrustedLocalOrigin(origin))) {
+      if (clientIp && isLoopbackIp(clientIp) && (!origin || isTrustedLocalOrigin(origin, c.req.header('host')))) {
         return next()
       }
     }
@@ -148,19 +148,24 @@ export function isLoopbackIp(ip: string): boolean {
   return false
 }
 
-/** Browser origins that are owned by a local OpenAlice surface. This keeps
- * localhost, Vite, and the packaged Electron app frictionless without letting
- * an arbitrary public page inherit the socket-level loopback bypass (including
- * while an SSH tunnel is open). */
-export function isTrustedLocalOrigin(origin: string): boolean {
+/** Browser origins that are owned by the local OpenAlice surface. Only the
+ *  exact same origin (Origin host === request Host) or the packaged
+ *  `app://openalice` renderer inherits the socket-level loopback bypass. An
+ *  arbitrary page on another localhost port does NOT: localhost is a shared
+ *  namespace, so port-level trust is not authentication. */
+export function isTrustedLocalOrigin(origin: string, requestHost?: string): boolean {
   try {
     const url = new URL(origin)
     if (url.protocol === 'app:' && url.hostname === 'openalice') return true
-    return (url.protocol === 'http:' || url.protocol === 'https:') && (
-      url.hostname === 'localhost' ||
-      url.hostname === '127.0.0.1' ||
-      url.hostname === '[::1]'
-    )
+    if (!requestHost) return false
+    const hostname = requestHost.replace(/:\d+$/, '').toLowerCase()
+    const loopbackHost = hostname === '127.0.0.1'
+      || hostname === 'localhost'
+      || hostname === '[::1]'
+      || hostname === '::1'
+    return loopbackHost
+      && (url.protocol === 'http:' || url.protocol === 'https:')
+      && url.host.toLowerCase() === requestHost.toLowerCase()
   } catch {
     return false
   }

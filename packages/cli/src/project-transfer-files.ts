@@ -3,29 +3,50 @@ import { posix } from 'node:path'
 import { parseDocument } from 'yaml'
 
 import type { ProjectTransferTransform } from './project-transfer.ts'
+import { unsealProjectTransferJson } from './project-transfer-secrets.ts'
 
-export function transformProjectTransferFile(input: {
+export async function transformProjectTransferFile(input: {
   path: string
   transform: ProjectTransferTransform
   bytes: Buffer
+  sourceHome: string
   destinationHome: string
-}): Buffer {
+}): Promise<Buffer> {
   switch (input.transform) {
     case 'workspace-registry-paths':
       return transformJson(input.bytes, (value) => rewriteWorkspaceRegistry(value, input.destinationHome))
     case 'workspace-catalog-paths':
       return transformJson(input.bytes, (value) => rewriteWorkspaceCatalog(value, input.destinationHome))
     case 'strip-ai-credentials':
-      return transformJson(input.bytes, (value) => ({
+      return transformSecretJson(input, (value) => ({
         ...recordValue(value),
         apiKeys: {},
         credentials: {},
       }))
     case 'strip-market-provider-keys':
-      return transformJson(input.bytes, (value) => ({ ...recordValue(value), providerKeys: {} }))
+      return transformSecretJson(input, (value) => ({ ...recordValue(value), providerKeys: {} }))
     case 'rewrite-issue-owner':
       return Buffer.from(rewriteIssueOwner(input.bytes.toString('utf8')), 'utf8')
   }
+}
+
+/**
+ * Secret config files may be sealed at rest. Unseal before applying the strip
+ * transform so the portable copy is plaintext with the credentials removed,
+ * never a ciphertext envelope that the destination cannot read.
+ */
+async function transformSecretJson(
+  input: { path: string; bytes: Buffer; sourceHome: string },
+  operation: (value: unknown) => unknown,
+): Promise<Buffer> {
+  let value: unknown
+  try {
+    value = JSON.parse(input.bytes.toString('utf8')) as unknown
+  } catch (error: unknown) {
+    throw transferTransformError('Portable configuration changed into invalid JSON after planning.', error)
+  }
+  const plaintext = await unsealProjectTransferJson(input.sourceHome, value, input.path)
+  return Buffer.from(`${JSON.stringify(operation(plaintext), null, 2)}\n`, 'utf8')
 }
 
 function rewriteWorkspaceRegistry(value: unknown, destinationHome: string): unknown {

@@ -145,6 +145,13 @@ export async function startUTAService(): Promise<void> {
   // ==================== HTTP app ====================
 
   const app = new Hono()
+  // UTA has no token gate; its security model is loopback-only. A browser
+  // page is not a local process in that model: it always sends Origin, so
+  // reject it before a simple cross-origin order POST can reach the routes.
+  app.use('*', async (c, next) => {
+    if (c.req.header('origin')) return c.json({ error: 'origin_not_allowed' }, 403)
+    await next()
+  })
 
   // Health probe — used by Guardian readiness gate and Alice BFF supervisor.
   app.get('/__uta/health', (c) => c.json({

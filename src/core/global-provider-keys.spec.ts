@@ -17,6 +17,7 @@ import { join } from 'path'
 let dataHome: string
 let globalDir: string
 let config: typeof import('./config.js')
+let sealing: typeof import('./sealing.js')
 
 beforeAll(async () => {
   dataHome = await mkdtemp(join(tmpdir(), 'oa-home-'))
@@ -25,6 +26,7 @@ beforeAll(async () => {
   process.env['OPENALICE_GLOBAL_DIR'] = globalDir
   // Import AFTER env is set — paths.ts/config.ts resolve their roots at load.
   config = await import('./config.js')
+  sealing = await import('./sealing.js')
 })
 
 afterAll(async () => {
@@ -61,7 +63,8 @@ describe('global provider keys', () => {
     await config.writeConfigSection('marketData', {
       providerKeys: { fred: 'new-fred', eia: '' }, // tiingo absent from payload
     })
-    const global = JSON.parse(await readFile(join(globalDir, 'provider-keys.json'), 'utf-8'))
+    const raw = JSON.parse(await readFile(join(globalDir, 'provider-keys.json'), 'utf-8'))
+    const global = sealing.isSealedEnvelope(raw) ? await sealing.unseal(raw) : raw
     expect(global.fred).toBe('new-fred')      // updated
     expect(global.eia).toBeUndefined()        // explicitly cleared → cleared globally
     expect(global.tiingo).toBe('old-tiingo')  // absent from payload → survives

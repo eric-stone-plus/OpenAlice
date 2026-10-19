@@ -9,7 +9,7 @@
 import { createHash } from 'node:crypto'
 import { readFile, copyFile, mkdir } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
-import { extname, join, posix } from 'node:path'
+import { extname, join, isAbsolute, posix, relative, resolve, sep } from 'node:path'
 import { dataPath } from '@/core/paths.js'
 
 /** 256 short, common English words — one per byte value. */
@@ -82,7 +82,15 @@ export async function persistMedia(filePath: string): Promise<string> {
   return posix.join(dateDir, name)
 }
 
-/** Resolve a media relative path to its absolute path on disk. */
+/** Resolve a media relative path to its absolute path on disk.
+ *  The route param is user-controlled and may decode `%2F` into `/`, so this
+ *  is a containment check, not a join: a traversal must never escape MEDIA_DIR. */
 export function resolveMediaPath(name: string): string {
-  return join(MEDIA_DIR, name)
+  const root = resolve(MEDIA_DIR)
+  const target = resolve(root, name)
+  const rel = relative(root, target)
+  if (rel === '' || rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
+    throw new Error('Invalid media path')
+  }
+  return target
 }

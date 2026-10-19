@@ -68,6 +68,14 @@ type WsMeta = { id: string; tag: string; dir?: string }
 /** Mount /cli/:wsId/:export/* onto an existing Hono app (the MCP server's app). */
 export function registerCliRoutes(app: Hono, deps: CliGatewayDeps, manifestOnly = false): void {
   const { toolCenter, workspaceToolCenter, inboxStore, entityStore, getWorkspaceService } = deps
+  // The workspace CLIs are local argv forwarders and send no Origin. A browser
+  // page always does, including a cross-origin `text/plain` POST that skips
+  // preflight; reject it before dispatch. This is the CSRF boundary for the
+  // loopback tool surface (the CLI itself still carries no secret).
+  app.use('/cli/*', async (c, next) => {
+    if (c.req.header('origin')) return c.json({ error: 'origin_not_allowed' }, 403)
+    await next()
+  })
   if (!manifestOnly) {
     registerConnectorModelRoutes(app, getWorkspaceService)
     registerProjectCliRoutes(app, toolCenter)

@@ -59,6 +59,13 @@ describe('seal / unseal', () => {
     }
   })
 
+  it('serializes concurrent first seals onto one key', async () => {
+    const { seal, unseal } = await loadSealing()
+    const [first, second] = await Promise.all([seal({ first: 1 }), seal({ second: 2 })])
+    await expect(unseal(first)).resolves.toEqual({ first: 1 })
+    await expect(unseal(second)).resolves.toEqual({ second: 2 })
+  })
+
   it('reuses the same key across seals (stable at-rest identity)', async () => {
     const { seal, unseal, sealingKeyPath } = await loadSealing()
     await seal({ first: true })

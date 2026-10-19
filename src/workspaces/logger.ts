@@ -9,9 +9,10 @@
  * take down session lifecycle, so all fs errors are swallowed.
  */
 
-import { createWriteStream, mkdirSync, type WriteStream } from 'node:fs';
+import { chmodSync, createWriteStream, mkdirSync, type WriteStream } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { userDataHome } from '@/core/paths.js';
+import { scrubValue } from '@/core/scrub.js';
 
 type Level = 'debug' | 'info' | 'warn' | 'error';
 
@@ -25,8 +26,10 @@ let fileStream: WriteStream | null | undefined;
 
 function openFileSink(path: string): WriteStream | null {
   try {
-    mkdirSync(dirname(path), { recursive: true });
-    const s = createWriteStream(path, { flags: 'a' });
+    mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+    // Existing logs from older builds were created 0644; tighten on open.
+    try { chmodSync(path, 0o600); } catch { /* file may not exist yet */ }
+    const s = createWriteStream(path, { flags: 'a', mode: 0o600 });
     s.on('error', () => { /* swallow — never take down spawn lifecycle */ });
     return s;
   } catch {
@@ -49,7 +52,7 @@ function write(level: Level, msg: string, fields: Record<string, unknown>, toCon
     msg,
     ...fields,
   };
-  const line = JSON.stringify(record, replacer) + '\n';
+  const line = JSON.stringify(scrubValue(record)) + '\n';
   if (toConsole) {
     if (level === 'error' || level === 'warn') {
       process.stderr.write(line);
@@ -76,13 +79,6 @@ function emit(level: Level, msg: string, fields: Record<string, unknown>): void 
  */
 function emitEvent(msg: string, fields: Record<string, unknown>): void {
   write('info', msg, fields, minLevel <= LEVELS.debug);
-}
-
-function replacer(_key: string, value: unknown): unknown {
-  if (value instanceof Error) {
-    return { name: value.name, message: value.message, stack: value.stack };
-  }
-  return value;
 }
 
 export interface Logger {

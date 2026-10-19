@@ -65,7 +65,7 @@ export function createAuthRoutes(opts: AuthRouteOptions = {}) {
     if (trustedProxies.size === 0) {
       const remote = getSocketRemoteAddress(c) ?? ''
       const origin = c.req.header('origin')
-      if (isLoopbackIp(remote) && (!origin || isTrustedLocalOrigin(origin))) {
+      if (isLoopbackIp(remote) && (!origin || isTrustedLocalOrigin(origin, c.req.header('host')))) {
         return c.json({ authed: true, tokenConfigured: tokenInfo.exists, passthrough: 'localhost' })
       }
     }

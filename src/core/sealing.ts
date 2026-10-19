@@ -81,12 +81,21 @@ async function loadOrCreateKey(): Promise<Buffer> {
   if (existing) return existing
   const key = randomBytes(KEY_BYTES)
   const path = sealingKeyPath()
-  await mkdir(dirname(path), { recursive: true })
-  // Owner-only, same belt-and-braces as auth/token-store.ts — writeFile's
-  // `mode` is ignored on some platforms, so chmod again best-effort.
-  await writeFile(path, key.toString('base64') + '\n', { mode: 0o600 })
-  await chmod(path, 0o600).catch(() => { /* noop — platform without chmod */ })
-  return key
+  await mkdir(dirname(path), { recursive: true, mode: 0o700 })
+  // `wx` makes first-run creation atomic across Alice and UTA: the loser gets
+  // EEXIST and re-reads the winner's key instead of overwriting it (which
+  // would make the winner's ciphertext permanently unreadable).
+  try {
+    await writeFile(path, key.toString('base64') + '\n', { mode: 0o600, flag: 'wx' })
+    await chmod(path, 0o600).catch(() => { /* noop — platform without chmod */ })
+    return key
+  } catch (err: unknown) {
+    if (err instanceof Error && 'code' in err && (err as NodeJS.ErrnoException).code === 'EEXIST') {
+      const raced = await readKey()
+      if (raced) return raced
+    }
+    throw err
+  }
 }
 
 /** Encrypt a JSON-serializable value into an envelope. Creates the sealing

@@ -462,10 +462,11 @@ async function walkPortableTree(
   )
   const sourceBytes = transform ? await readFile(absolutePath) : null
   const portableBytes = transform && sourceBytes
-    ? transformProjectTransferFile({
+    ? await transformProjectTransferFile({
         path: relativePath,
         transform,
         bytes: sourceBytes,
+        sourceHome: home,
         destinationHome: context.destinationHome,
       })
     : null

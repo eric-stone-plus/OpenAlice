@@ -220,6 +220,7 @@ export function MarketDataPage() {
   }
 
   const providerKeys = (config.providerKeys ?? {}) as Record<string, string>
+  const providerKeyStatus = (config.providerKeyStatus ?? {}) as Record<string, boolean>
   const extraVendors = (config.extraVendors ?? []) as string[]
   const sourceRows = deriveSourceRows(hub.enabled, ping, providerKeys, extraVendors, trading.utas)
 
@@ -308,6 +309,7 @@ export function MarketDataPage() {
             open={advancedOpen}
             onToggle={() => setAdvancedOpen((o) => !o)}
             providerKeys={providerKeys}
+            providerKeyStatus={providerKeyStatus}
             onKeyChange={handleKeyChange}
             hub={hub}
             onHubChange={(next) => updateConfigImmediate({ hub: next })}
@@ -486,6 +488,7 @@ function AdvancedSection({
   open,
   onToggle,
   providerKeys,
+  providerKeyStatus,
   onKeyChange,
   hub,
   onHubChange,
@@ -495,6 +498,7 @@ function AdvancedSection({
   open: boolean
   onToggle: () => void
   providerKeys: Record<string, string>
+  providerKeyStatus: Record<string, boolean>
   onKeyChange: (keyName: string, value: string) => void
   hub: { enabled: boolean; baseUrl: string }
   onHubChange: (next: { enabled: boolean; baseUrl: string }) => void
@@ -519,6 +523,7 @@ function AdvancedSection({
         <div className="mt-2 rounded-lg border border-border/70 bg-card px-5">
           <KeyProvidersSection
             providerKeys={providerKeys}
+            providerKeyStatus={providerKeyStatus}
             onKeyChange={onKeyChange}
             fmpRef={fmpRef}
             highlightFmp={highlightFmp}
@@ -598,11 +603,13 @@ function TestButton({
 
 function KeyProvidersSection({
   providerKeys,
+  providerKeyStatus,
   onKeyChange,
   fmpRef,
   highlightFmp,
 }: {
   providerKeys: Record<string, string>
+  providerKeyStatus: Record<string, boolean>
   onKeyChange: (keyName: string, value: string) => void
   fmpRef: React.RefObject<HTMLDivElement | null>
   highlightFmp: boolean
@@ -678,7 +685,7 @@ function KeyProvidersSection({
                           onChange={(e) => handleKeyChange(key, e.target.value)}
                           aria-label={`${name} API key`}
                           aria-describedby={`${descriptionId} ${hintId} ${statusId}`}
-                          placeholder="Not configured"
+                          placeholder={providerKeyStatus[key] ? 'Configured — leave blank to keep' : 'Not configured'}
                         />
                         <TestButton
                           providerName={name}

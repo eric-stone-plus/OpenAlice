@@ -23,3 +23,34 @@ it('serves exact binary bytes and refuses missing, escaping, symlink and oversiz
     expect((await app.request('/cli/workspace-files/absent?path=report.pdf')).status).toBe(404)
   } finally { await rm(root, { recursive: true, force: true }); await rm(outside, { recursive: true, force: true }) }
 })
+
+it('refuses credential stores and key material at any depth', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'reply-secret-files-'))
+  try {
+    const app = new Hono()
+    registerWorkspaceFileRoutes(app, id => id === 'ws' ? { dir: root } : undefined)
+    for (const path of [
+      '.env',
+      'config/.env',
+      '.pi/openalice-provider.json',
+      '.codex/env.json',
+      '.claude/settings.local.json',
+      '.opencode/openalice-provider.json',
+      'secrets/api.txt',
+      'provider-keys.json',
+      'wallet.json',
+      'id_rsa',
+      'cert.pem',
+      'config/auth.json',
+    ]) {
+      const res = await app.request(`/cli/workspace-files/ws?path=${encodeURIComponent(path)}`)
+      expect(res.status, path).toBe(403)
+      expect(await res.json(), path).toEqual({ error: 'secret_path' })
+    }
+    const origin = await app.request('/cli/workspace-files/ws?path=report.pdf', {
+      headers: { origin: 'https://evil.example' },
+    })
+    expect(origin.status).toBe(403)
+    expect(await origin.json()).toEqual({ error: 'origin_not_allowed' })
+  } finally { await rm(root, { recursive: true, force: true }) }
+})

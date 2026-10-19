@@ -1,15 +1,121 @@
 import { z } from 'zod'
 import { readFile, writeFile, mkdir, unlink, rm, rename, chmod } from 'fs/promises'
-import { resolve, join, dirname } from 'path'
-import { homedir } from 'os'
+import { resolve, dirname } from 'path'
 import { newsCollectorSchema } from '../domain/news/config.js'
 import { runMigrations } from '../migrations/runner.js'
 import { dataPath } from '@/core/paths.js'
 import { withConfigBootstrapLock } from './config-bootstrap-lock.js'
 import { parseDuration } from './duration.js'
 import { isSealedEnvelope, seal, unseal } from './sealing.js'
+import { globalProviderKeysFile, isSecretConfigFile } from './secret-files.js'
+import { preserveSecretFields } from './redaction.js'
 
 const CONFIG_DIR = dataPath('config')
+
+/**
+ * Secret-bearing files are sealed with the same AES-256-GCM envelope as
+ * accounts.json and written owner-only. `sealing.key` lives outside data/, so
+ * backing up or syncing data/ never carries the material needed to read them.
+ */
+async function ensureConfigDir(): Promise<void> {
+  await mkdir(CONFIG_DIR, { recursive: true, mode: 0o700 })
+  await chmod(CONFIG_DIR, 0o700).catch(() => { /* platform without chmod */ })
+  // The portable data/ root contains config/ and _backup/; keep it owner-only
+  // too, so a stray 0644 file inside is not reachable by another local user.
+  await chmod(dirname(CONFIG_DIR), 0o700).catch(() => { /* platform without chmod */ })
+}
+
+/** Read a JSON file that may be sealed. Quarantines an unreadable envelope
+ *  instead of deleting it, then returns undefined so the caller can seed
+ *  defaults and keep the app bootable. */
+async function readSecretFileAt(path: string): Promise<unknown | undefined> {
+  let raw: unknown
+  try {
+    raw = JSON.parse(await readFile(path, 'utf-8'))
+  } catch (err: unknown) {
+    if (err instanceof Error && 'code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT') {
+      return undefined
+    }
+    throw err
+  }
+  if (!isSealedEnvelope(raw)) return raw
+  try {
+    return await unseal(raw)
+  } catch (err) {
+    const quarantine = `${path}.sealed-unreadable-${Date.now()}`
+    await rename(path, quarantine).catch(() => { /* best effort */ })
+    console.error(
+      `${path} could not be unsealed: ${err instanceof Error ? err.message : String(err)}\n` +
+      `The file was preserved at ${quarantine}. Starting with defaults — ` +
+      `re-enter credentials in Settings.`,
+    )
+    return undefined
+  }
+}
+
+async function readSecretJsonFile(filename: string): Promise<unknown | undefined> {
+  return readSecretFileAt(resolve(CONFIG_DIR, filename))
+}
+
+/** Strict read for read-modify-write paths: an existing but unreadable file
+ *  must abort the write instead of being replaced with defaults. */
+async function readSecretFileAtStrict(path: string): Promise<unknown | undefined> {
+  let raw: unknown
+  try {
+    raw = JSON.parse(await readFile(path, 'utf-8'))
+  } catch (err: unknown) {
+    if (err instanceof Error && 'code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT') {
+      return undefined
+    }
+    throw new Error(
+      `${path} is unreadable; refusing to overwrite it: ${err instanceof Error ? err.message : String(err)}`,
+    )
+  }
+  if (!isSealedEnvelope(raw)) return raw
+  try {
+    return await unseal(raw)
+  } catch (err) {
+    throw new Error(
+      `${path} could not be unsealed; refusing to overwrite it: ${err instanceof Error ? err.message : String(err)}`,
+    )
+  }
+}
+
+async function readSecretJsonFileStrict(filename: string): Promise<unknown | undefined> {
+  return readSecretFileAtStrict(resolve(CONFIG_DIR, filename))
+}
+
+/** Write through a same-directory temp file and rename, so a crash cannot
+ *  truncate the only copy of a credential store. */
+async function writeJsonAtomicAt(path: string, value: unknown, secret: boolean): Promise<void> {
+  await mkdir(dirname(path), { recursive: true, mode: 0o700 })
+  await chmod(dirname(path), 0o700).catch(() => { /* platform without chmod */ })
+  const temporary = `${path}.${process.pid}.${Date.now()}.tmp`
+  try {
+    const payload = secret ? await seal(value) : value
+    if (secret) {
+      await writeFile(temporary, JSON.stringify(payload, null, 2) + '\n', { mode: 0o600 })
+      await chmod(temporary, 0o600).catch(() => { /* platform without chmod */ })
+    } else {
+      await writeFile(temporary, JSON.stringify(payload, null, 2) + '\n')
+    }
+    await rename(temporary, path)
+  } catch (err) {
+    await unlink(temporary).catch(() => { /* best effort */ })
+    throw err
+  }
+}
+
+/** Seal a value and write it 0600. Also creates/chmods the parent directory
+ *  to 0700 so a first-run write cannot leave a world-readable path. */
+async function writeSecretFileAt(path: string, value: unknown): Promise<void> {
+  await writeJsonAtomicAt(path, value, true)
+}
+
+async function writeJsonFile(filename: string, value: unknown, secret = false): Promise<void> {
+  await ensureConfigDir()
+  await writeJsonAtomicAt(resolve(CONFIG_DIR, filename), value, secret)
+}
 
 // ==================== Global provider keys (cross-checkout) ====================
 // Data-vendor API keys (FRED / FMP / EIA / BLS / …) are USER-level, not
@@ -20,16 +126,9 @@ const CONFIG_DIR = dataPath('config')
 // wins. Broker credentials deliberately stay instance-local: data/ next to
 // the source tree is the audit boundary for anything money-capable.
 
-/** Resolved per call (not module-const) so tests / portable installs can
- *  point it elsewhere via OPENALICE_GLOBAL_DIR. */
-function globalProviderKeysFile(): string {
-  const root = process.env['OPENALICE_GLOBAL_DIR'] ?? join(homedir(), '.openalice')
-  return join(root, 'provider-keys.json')
-}
-
 async function readGlobalProviderKeys(): Promise<Record<string, string>> {
   try {
-    const raw: unknown = JSON.parse(await readFile(globalProviderKeysFile(), 'utf-8'))
+    const raw = await readSecretFileAt(globalProviderKeysFile())
     if (typeof raw !== 'object' || raw === null) return {}
     return Object.fromEntries(
       Object.entries(raw).filter(([, v]) => typeof v === 'string' && v !== ''),
@@ -59,9 +158,7 @@ async function mirrorProviderKeysToGlobal(keys: Record<string, string | undefine
     if (typeof v === 'string' && v.trim() !== '') global[k] = v
     else if (v === '') delete global[k]
   }
-  const file = globalProviderKeysFile()
-  await mkdir(dirname(file), { recursive: true })
-  await writeFile(file, JSON.stringify(global, null, 2) + '\n')
+  await writeSecretFileAt(globalProviderKeysFile(), global)
 }
 
 // ==================== Individual Schemas ====================
@@ -329,19 +426,10 @@ const marketDataSchema = z.object({
    *  surfaced as extra searchBars candidates in their own namespace, never a
    *  replacement. Each name must be registered by the embedded provider layer. */
   extraVendors: z.array(z.string()).default([]),
-  providerKeys: z.object({
-    fred: z.string().optional(),
-    fmp: z.string().optional(),
-    eia: z.string().optional(),
-    bls: z.string().optional(),
-    nasdaq: z.string().optional(),
-    tradingeconomics: z.string().optional(),
-    econdb: z.string().optional(),
-    intrinio: z.string().optional(),
-    benzinga: z.string().optional(),
-    tiingo: z.string().optional(),
-    biztoc: z.string().optional(),
-  }).default({}),
+  // Arbitrary vendor ids are allowed: a user can add a key for a provider the
+  // UI does not know yet (e.g. Finnhub) through the global provider-key store,
+  // and the local section must preserve it instead of stripping it on save.
+  providerKeys: z.record(z.string(), z.string().optional()).default({}),
   /** Hosted reference-data hub (TraderHub). Enabled by default: anonymous
    *  GETs of public boards, no user data attached; one switch to opt out.
    *  Self-hosters point baseUrl at their own instance. */
@@ -527,12 +615,11 @@ async function parseAndSeed<T>(
   filename: string,
   schema: z.ZodType<T>,
   raw: unknown | undefined,
-  options?: { persistDefaults?: boolean },
+  options?: { persistDefaults?: boolean; secret?: boolean },
 ): Promise<T> {
   const parsed = schema.parse(raw ?? {})
   if (raw === undefined && options?.persistDefaults !== false) {
-    await mkdir(CONFIG_DIR, { recursive: true })
-    await writeFile(resolve(CONFIG_DIR, filename), JSON.stringify(parsed, null, 2) + '\n')
+    await writeJsonFile(filename, parsed, options?.secret === true)
   }
   return parsed
 }
@@ -548,15 +635,15 @@ async function loadConfigUnlocked(): Promise<Config> {
   await runMigrations()
 
   const files = ['engine.json', 'agent.json', 'crypto.json', 'securities.json', 'market-data.json', 'ai-provider-manager.json', 'snapshot.json', 'mcp.json', 'ports.json', 'news.json', 'tools.json', 'trading.json'] as const
-  const raws = await Promise.all(files.map((f) => loadJsonFile(f)))
+  const raws = await Promise.all(files.map((f) => isSecretConfigFile(f) ? readSecretJsonFile(f) : loadJsonFile(f)))
 
   const config: Config = {
     engine:        await parseAndSeed(files[0], engineSchema, raws[0]),
     agent:         await parseAndSeed(files[1], agentSchema, raws[1]),
-    crypto:        await parseAndSeed(files[2], cryptoSchema, raws[2]),
-    securities:    await parseAndSeed(files[3], securitiesSchema, raws[3]),
-    marketData:    await applyGlobalProviderKeys(await parseAndSeed(files[4], marketDataSchema, raws[4])),
-    aiProvider:    await parseAndSeed(files[5], aiProviderSchema, raws[5]),
+    crypto:        await parseAndSeed(files[2], cryptoSchema, raws[2], { secret: true }),
+    securities:    await parseAndSeed(files[3], securitiesSchema, raws[3], { secret: true }),
+    marketData:    await applyGlobalProviderKeys(await parseAndSeed(files[4], marketDataSchema, raws[4], { secret: true })),
+    aiProvider:    await parseAndSeed(files[5], aiProviderSchema, raws[5], { secret: true }),
     snapshot:      await parseAndSeed(files[6], snapshotSchema, raws[6]),
     mcp:           await parseAndSeed(files[7], mcpSchema, raws[7]),
     // Missing ports.json is unconfigured, not "use 47331 forever". Seeding a
@@ -707,10 +794,7 @@ function migrateLegacyUTA(raw: Record<string, unknown>): Record<string, unknown>
  * regress to plaintext credentials at rest.
  */
 async function writeAccountsFile(validated: UTAConfig[]): Promise<void> {
-  await mkdir(CONFIG_DIR, { recursive: true })
-  const path = resolve(CONFIG_DIR, 'accounts.json')
-  await writeFile(path, JSON.stringify(await seal(validated), null, 2) + '\n', { mode: 0o600 })
-  await chmod(path, 0o600).catch(() => { /* noop — platform without chmod */ })
+  await writeSecretFileAt(resolve(CONFIG_DIR, 'accounts.json'), validated)
 }
 
 // File name on disk stays `accounts.json` — internal-only, never
@@ -753,7 +837,7 @@ export async function readUTAsConfig(): Promise<UTAConfig[]> {
   // translated records to disk so subsequent reads skip this branch.
   if (Array.isArray(raw) && (raw as unknown[]).some((r) => isLegacyRecord(r as Record<string, unknown>))) {
     const backupPath = resolve(CONFIG_DIR, 'accounts.json.backup-pre-preset')
-    await writeFile(backupPath, JSON.stringify(raw, null, 2) + '\n')
+    await writeSecretFileAt(backupPath, raw)
 
     const migrated: Record<string, unknown>[] = []
     const skipped: string[] = []
@@ -836,18 +920,25 @@ export async function readAgentConfig() {
 /** Read AI provider config from disk (called per-request for hot-reload). */
 export async function readAIProviderConfig() {
   try {
-    const raw = JSON.parse(await readFile(resolve(CONFIG_DIR, 'ai-provider-manager.json'), 'utf-8'))
-    return aiProviderSchema.parse(raw)
+    const raw = await readSecretJsonFile('ai-provider-manager.json')
+    return aiProviderSchema.parse(raw ?? {})
   } catch {
     return aiProviderSchema.parse({})
   }
 }
 
+/** Strict read for read-modify-write paths. A corrupt or unreadable vault must
+ *  abort the write, not be silently replaced with a defaults-only object. */
+async function readAIProviderConfigForWrite() {
+  const raw = await readSecretJsonFileStrict('ai-provider-manager.json')
+  return aiProviderSchema.parse(raw ?? {})
+}
+
 /** Read market data config from disk (called per-request for hot-reload). */
 export async function readMarketDataConfig() {
   try {
-    const raw = JSON.parse(await readFile(resolve(CONFIG_DIR, 'market-data.json'), 'utf-8'))
-    return applyGlobalProviderKeys(marketDataSchema.parse(raw))
+    const raw = await readSecretJsonFile('market-data.json')
+    return applyGlobalProviderKeys(marketDataSchema.parse(raw ?? {}))
   } catch {
     return applyGlobalProviderKeys(marketDataSchema.parse({}))
   }
@@ -867,12 +958,11 @@ export async function readMarketDataConfig() {
 export async function updateExtraVendors(
   mutate: (current: string[]) => string[],
 ): Promise<string[]> {
-  const raw = (await loadJsonFile('market-data.json')) ?? {}
+  const raw = (await readSecretJsonFileStrict('market-data.json')) ?? {}
   const parsed = marketDataSchema.parse(raw)
   const next = [...new Set(mutate(parsed.extraVendors))]
   const updated = marketDataSchema.parse({ ...parsed, extraVendors: next })
-  await mkdir(CONFIG_DIR, { recursive: true })
-  await writeFile(resolve(CONFIG_DIR, 'market-data.json'), JSON.stringify(updated, null, 2) + '\n')
+  await writeJsonFile('market-data.json', updated, true)
   return next
 }
 
@@ -904,11 +994,10 @@ export async function readCredentials(): Promise<Record<string, Credential>> {
 
 /** Write a single credential (create or update). */
 export async function writeCredential(slug: string, credential: Credential): Promise<void> {
-  const config = await readAIProviderConfig()
+  const config = await readAIProviderConfigForWrite()
   const validated = credentialSchema.parse(credential)
   config.credentials[slug] = validated
-  await mkdir(CONFIG_DIR, { recursive: true })
-  await writeFile(resolve(CONFIG_DIR, 'ai-provider-manager.json'), JSON.stringify(config, null, 2) + '\n')
+  await writeJsonFile('ai-provider-manager.json', config, true)
 }
 
 /**
@@ -923,7 +1012,7 @@ export async function writeCredential(slug: string, credential: Credential): Pro
  * Alice" path.
  */
 export async function addCredential(credential: Credential): Promise<string> {
-  const config = await readAIProviderConfig()
+  const config = await readAIProviderConfigForWrite()
   const validated = credentialSchema.parse(credential)
   const match = Object.entries(config.credentials).find(([, c]) =>
     c.vendor === validated.vendor &&
@@ -946,8 +1035,7 @@ export async function addCredential(credential: Credential): Promise<string> {
       ...(validated.label ?? existing.label ? { label: validated.label ?? existing.label } : {}),
       ...(validated.lastModel ?? existing.lastModel ? { lastModel: validated.lastModel ?? existing.lastModel } : {}),
     }
-    await mkdir(CONFIG_DIR, { recursive: true })
-    await writeFile(resolve(CONFIG_DIR, 'ai-provider-manager.json'), JSON.stringify(config, null, 2) + '\n')
+    await writeJsonFile('ai-provider-manager.json', config, true)
     return match[0]
   }
   const taken = new Set(Object.keys(config.credentials))
@@ -955,8 +1043,7 @@ export async function addCredential(credential: Credential): Promise<string> {
   while (taken.has(`${validated.vendor}-${n}`)) n++
   const slug = `${validated.vendor}-${n}`
   config.credentials[slug] = validated
-  await mkdir(CONFIG_DIR, { recursive: true })
-  await writeFile(resolve(CONFIG_DIR, 'ai-provider-manager.json'), JSON.stringify(config, null, 2) + '\n')
+  await writeJsonFile('ai-provider-manager.json', config, true)
   return slug
 }
 
@@ -967,17 +1054,16 @@ export async function addCredential(credential: Credential): Promise<string> {
  */
 export async function setCredentialLastModel(slug: string, model: string): Promise<void> {
   if (!model) return
-  const config = await readAIProviderConfig()
+  const config = await readAIProviderConfigForWrite()
   const cred = config.credentials[slug]
   if (!cred || cred.lastModel === model) return
   config.credentials[slug] = { ...cred, lastModel: model }
-  await mkdir(CONFIG_DIR, { recursive: true })
-  await writeFile(resolve(CONFIG_DIR, 'ai-provider-manager.json'), JSON.stringify(config, null, 2) + '\n')
+  await writeJsonFile('ai-provider-manager.json', config, true)
 }
 
 /** Delete a credential from the vault. */
 export async function deleteCredential(slug: string): Promise<void> {
-  const config = await readAIProviderConfig()
+  const config = await readAIProviderConfigForWrite()
   delete config.credentials[slug]
   // Drop any workspace-default that pointed at the now-gone slug, so the
   // Settings dropdown never shows a dangling default (injection would skip it
@@ -985,8 +1071,7 @@ export async function deleteCredential(slug: string): Promise<void> {
   for (const [agentId, def] of Object.entries(config.workspaceCredentialDefaults)) {
     if (def.credentialSlug === slug) delete config.workspaceCredentialDefaults[agentId]
   }
-  await mkdir(CONFIG_DIR, { recursive: true })
-  await writeFile(resolve(CONFIG_DIR, 'ai-provider-manager.json'), JSON.stringify(config, null, 2) + '\n')
+  await writeJsonFile('ai-provider-manager.json', config, true)
 }
 
 /**
@@ -1005,30 +1090,28 @@ export async function readWorkspaceCredentialDefaults(): Promise<Record<string, 
 export async function writeWorkspaceCredentialDefaults(
   defaults: Record<string, WorkspaceCredentialDefault>,
 ): Promise<void> {
-  const config = await readAIProviderConfig()
+  const config = await readAIProviderConfigForWrite()
   const cleaned: Record<string, WorkspaceCredentialDefault> = {}
   for (const [agentId, def] of Object.entries(defaults)) {
     const parsed = workspaceCredentialDefaultSchema.parse(def)
     if (parsed.credentialSlug) cleaned[agentId] = parsed
   }
   config.workspaceCredentialDefaults = cleaned
-  await mkdir(CONFIG_DIR, { recursive: true })
-  await writeFile(resolve(CONFIG_DIR, 'ai-provider-manager.json'), JSON.stringify(config, null, 2) + '\n')
+  await writeJsonFile('ai-provider-manager.json', config, true)
 }
 
 /** Replace the per-agent defaults that seed newly created Workspaces. */
 export async function writeWorkspaceCreationDefaults(
   defaults: Record<string, WorkspaceCredentialDefault>,
 ): Promise<void> {
-  const config = await readAIProviderConfig()
+  const config = await readAIProviderConfigForWrite()
   const cleaned: Record<string, WorkspaceCredentialDefault> = {}
   for (const [agentId, def] of Object.entries(defaults)) {
     const parsed = workspaceCredentialDefaultSchema.parse(def)
     if (parsed.credentialSlug) cleaned[agentId] = parsed
   }
   config.workspaceCredentialDefaults = cleaned
-  await mkdir(CONFIG_DIR, { recursive: true })
-  await writeFile(resolve(CONFIG_DIR, 'ai-provider-manager.json'), JSON.stringify(config, null, 2) + '\n')
+  await writeJsonFile('ai-provider-manager.json', config, true)
 }
 
 export async function readWorkspaceDefaultAgent(): Promise<string | null> {
@@ -1037,10 +1120,9 @@ export async function readWorkspaceDefaultAgent(): Promise<string | null> {
 }
 
 export async function writeWorkspaceDefaultAgent(agentId: string | null): Promise<void> {
-  const config = await readAIProviderConfig()
+  const config = await readAIProviderConfigForWrite()
   config.workspaceDefaultAgent = agentId && agentId.trim() ? agentId.trim() : null
-  await mkdir(CONFIG_DIR, { recursive: true })
-  await writeFile(resolve(CONFIG_DIR, 'ai-provider-manager.json'), JSON.stringify(config, null, 2) + '\n')
+  await writeJsonFile('ai-provider-manager.json', config, true)
 }
 
 export async function readIssueDefaultAgent(): Promise<string | null> {
@@ -1049,10 +1131,9 @@ export async function readIssueDefaultAgent(): Promise<string | null> {
 }
 
 export async function writeIssueDefaultAgent(agentId: string | null): Promise<void> {
-  const config = await readAIProviderConfig()
+  const config = await readAIProviderConfigForWrite()
   config.issueDefaultAgent = agentId && agentId.trim() ? agentId.trim() : null
-  await mkdir(CONFIG_DIR, { recursive: true })
-  await writeFile(resolve(CONFIG_DIR, 'ai-provider-manager.json'), JSON.stringify(config, null, 2) + '\n')
+  await writeJsonFile('ai-provider-manager.json', config, true)
 }
 
 // ==================== Writer ====================
@@ -1092,15 +1173,146 @@ const sectionFiles: Record<ConfigSection, string> = {
 /** All valid config section names (derived from sectionSchemas). */
 export const validSections = Object.keys(sectionSchemas) as ConfigSection[]
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/** Keys the client explicitly set (non-empty) plus keys it explicitly cleared. */
+function explicitProviderKeys(data: unknown): Record<string, string> {
+  if (!isPlainObject(data)) return {}
+  const out: Record<string, string> = {}
+  const keys = data['providerKeys']
+  if (isPlainObject(keys)) {
+    for (const [key, value] of Object.entries(keys)) {
+      if (typeof value === 'string') out[key] = value
+    }
+  }
+  const clears = data['clearProviderKeys']
+  if (Array.isArray(clears)) {
+    for (const key of clears) if (typeof key === 'string') out[key] = ''
+  }
+  return out
+}
+
+/**
+ * Merge a redacted Market Data PUT with the stored section.
+ *
+ * The GET never returns provider keys, so a client that echoes the section
+ * back sends an empty `providerKeys` map. Only non-empty submitted values are
+ * applied; an empty value is "not changed". Explicit removal uses the separate
+ * `clearProviderKeys` list, so a redacted echo can never erase a key.
+ */
+function mergeMarketDataInput(existing: Record<string, unknown>, incoming: unknown): Record<string, unknown> {
+  const input = isPlainObject(incoming) ? { ...incoming } : {}
+  const existingKeys = isPlainObject(existing['providerKeys'])
+    ? existing['providerKeys'] as Record<string, string | undefined>
+    : {}
+  const merged: Record<string, string | undefined> = { ...existingKeys }
+  const submittedKeys = input['providerKeys']
+  if (isPlainObject(submittedKeys)) {
+    for (const [key, value] of Object.entries(submittedKeys)) {
+      // Present-and-empty is the explicit clear signal (the legacy contract);
+      // absent keys are preserved so a redacted GET→PUT echo cannot wipe the
+      // whole map.
+      if (typeof value !== 'string') continue
+      if (value.trim() === '') delete merged[key]
+      else merged[key] = value
+    }
+  }
+  const clears = input['clearProviderKeys']
+  if (Array.isArray(clears)) {
+    for (const key of clears) if (typeof key === 'string') delete merged[key]
+  }
+  delete input['clearProviderKeys']
+  // A partial section edit (e.g. the hub URL) must not reset the rest to
+  // schema defaults. Merge known nested objects, then let incoming win.
+  if (isPlainObject(existing['hub']) && isPlainObject(input['hub'])) {
+    input['hub'] = { ...existing['hub'], ...input['hub'] }
+  }
+  if (isPlainObject(existing['providers']) && isPlainObject(input['providers'])) {
+    input['providers'] = { ...existing['providers'], ...input['providers'] }
+  }
+  return { ...existing, ...input, providerKeys: merged }
+}
+
+function mergeCryptoInput(existing: Record<string, unknown>, incoming: unknown): Record<string, unknown> {
+  const input = isPlainObject(incoming) ? { ...incoming } : {}
+  const existingProvider = isPlainObject(existing['provider']) ? existing['provider'] : undefined
+  const incomingProvider = isPlainObject(input['provider']) ? { ...input['provider'] } : undefined
+  if (
+    existingProvider?.['type'] === 'ccxt' &&
+    incomingProvider?.['type'] === 'ccxt' &&
+    existingProvider['exchange'] === incomingProvider['exchange']
+  ) {
+    input['provider'] = preserveSecretFields(existingProvider, incomingProvider) as Record<string, unknown>
+  } else if (incomingProvider) {
+    // A different exchange is a different credential. Keep a newly supplied
+    // non-empty value, but never carry the old exchange's key or store a
+    // blank placeholder.
+    for (const field of ['apiKey', 'apiSecret', 'password']) {
+      if (incomingProvider[field] === '') delete incomingProvider[field]
+    }
+    input['provider'] = incomingProvider
+  }
+  if (Array.isArray(existing['guards']) && Array.isArray(input['guards'])) {
+    input['guards'] = preserveSecretFields(existing['guards'], input['guards'])
+  } else if (input['guards'] === undefined) {
+    input['guards'] = existing['guards']
+  }
+  return { ...existing, ...input }
+}
+
+function mergeSecuritiesInput(existing: Record<string, unknown>, incoming: unknown): Record<string, unknown> {
+  const input = isPlainObject(incoming) ? { ...incoming } : {}
+  const existingProvider = isPlainObject(existing['provider']) ? existing['provider'] : undefined
+  const incomingProvider = isPlainObject(input['provider']) ? { ...input['provider'] } : undefined
+  if (existingProvider?.['type'] === 'alpaca' && incomingProvider?.['type'] === 'alpaca') {
+    input['provider'] = preserveSecretFields(existingProvider, incomingProvider) as Record<string, unknown>
+  } else if (incomingProvider) {
+    for (const field of ['apiKey', 'secretKey']) {
+      if (incomingProvider[field] === '') delete incomingProvider[field]
+    }
+    input['provider'] = incomingProvider
+  }
+  if (Array.isArray(existing['guards']) && Array.isArray(input['guards'])) {
+    input['guards'] = preserveSecretFields(existing['guards'], input['guards'])
+  } else if (input['guards'] === undefined) {
+    input['guards'] = existing['guards']
+  }
+  return { ...existing, ...input }
+}
+
+function mergeAIProviderInput(existing: Record<string, unknown>, incoming: unknown): Record<string, unknown> {
+  const merged = preserveSecretFields(existing, incoming) as Record<string, unknown>
+  // The redacted GET returns empty containers. Merge rather than replace, so
+  // a generic section save cannot erase the credential vault. Credential
+  // deletion goes through the dedicated DELETE routes.
+  for (const key of ['apiKeys', 'credentials', 'workspaceCredentialDefaults']) {
+    if (isPlainObject(existing[key]) && isPlainObject(merged[key])) {
+      merged[key] = { ...existing[key], ...merged[key] }
+    }
+  }
+  return merged
+}
+
 /** Validate and write a config section to disk. Returns the validated config. */
 export async function writeConfigSection(section: ConfigSection, data: unknown): Promise<unknown> {
   const schema = sectionSchemas[section]
-  const validated = schema.parse(data)
-  await mkdir(CONFIG_DIR, { recursive: true })
-  await writeFile(resolve(CONFIG_DIR, sectionFiles[section]), JSON.stringify(validated, null, 2) + '\n')
+  let input = data
+  if (section === 'marketData' || section === 'crypto' || section === 'securities' || section === 'aiProvider') {
+    const raw = await readSecretJsonFileStrict(sectionFiles[section])
+    const existing = schema.parse(raw ?? {}) as Record<string, unknown>
+    if (section === 'marketData') input = mergeMarketDataInput(existing, data)
+    else if (section === 'crypto') input = mergeCryptoInput(existing, data)
+    else if (section === 'securities') input = mergeSecuritiesInput(existing, data)
+    else input = mergeAIProviderInput(existing, data)
+  }
+  const validated = schema.parse(input)
+  const filename = sectionFiles[section]
+  await writeJsonFile(filename, validated, isSecretConfigFile(filename))
   if (section === 'marketData') {
-    const keys = (validated as { providerKeys?: Record<string, string | undefined> }).providerKeys
-    if (keys) await mirrorProviderKeysToGlobal(keys)
+    const keys = explicitProviderKeys(data)
+    if (Object.keys(keys).length) await mirrorProviderKeysToGlobal(keys)
   }
   return validated
 }
@@ -1114,6 +1326,5 @@ export async function readWebSubchannels(): Promise<WebChannel[]> {
 /** Write web sub-channel definitions to disk. */
 export async function writeWebSubchannels(channels: WebChannel[]): Promise<void> {
   const validated = webSubchannelsSchema.parse(channels)
-  await mkdir(CONFIG_DIR, { recursive: true })
-  await writeFile(resolve(CONFIG_DIR, 'web-subchannels.json'), JSON.stringify(validated, null, 2) + '\n')
+  await writeJsonFile('web-subchannels.json', validated)
 }

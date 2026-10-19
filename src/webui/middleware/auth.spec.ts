@@ -88,16 +88,28 @@ describe('isLoopbackIp', () => {
 })
 
 describe('isTrustedLocalOrigin', () => {
-  it('accepts local browser origins on any port', () => {
-    expect(isTrustedLocalOrigin('http://127.0.0.1:47331')).toBe(true)
-    expect(isTrustedLocalOrigin('http://localhost:5173')).toBe(true)
-    expect(isTrustedLocalOrigin('https://[::1]:47331')).toBe(true)
+  it('accepts the exact same origin and the packaged app renderer', () => {
+    expect(isTrustedLocalOrigin('http://127.0.0.1:47331', '127.0.0.1:47331')).toBe(true)
+    expect(isTrustedLocalOrigin('http://localhost:47331', 'localhost:47331')).toBe(true)
+    expect(isTrustedLocalOrigin('http://localhost:47331', 'LOCALHOST:47331')).toBe(true)
+    expect(isTrustedLocalOrigin('https://[::1]:47331', '[::1]:47331')).toBe(true)
     expect(isTrustedLocalOrigin('app://openalice')).toBe(true)
   })
 
+  it('rejects a different localhost port and a missing request host', () => {
+    expect(isTrustedLocalOrigin('http://localhost:5173', '127.0.0.1:47331')).toBe(false)
+    expect(isTrustedLocalOrigin('http://127.0.0.1:40123', '127.0.0.1:47331')).toBe(false)
+    expect(isTrustedLocalOrigin('http://localhost:5173')).toBe(false)
+  })
+
+  it('rejects a same-origin public host (reverse proxy / DNS rebinding)', () => {
+    expect(isTrustedLocalOrigin('https://alice.example.com', 'alice.example.com')).toBe(false)
+    expect(isTrustedLocalOrigin('http://evil.com:47331', 'evil.com:47331')).toBe(false)
+  })
+
   it('rejects public and malformed origins', () => {
-    expect(isTrustedLocalOrigin('https://example.com')).toBe(false)
-    expect(isTrustedLocalOrigin('null')).toBe(false)
+    expect(isTrustedLocalOrigin('https://example.com', '127.0.0.1:47331')).toBe(false)
+    expect(isTrustedLocalOrigin('null', '127.0.0.1:47331')).toBe(false)
   })
 })
 
@@ -147,10 +159,26 @@ describe('auth middleware — playbook 01 (auth bypass)', () => {
     expect(res.status).toBe(200)
   })
 
-  it('loopback browser origin keeps the localhost bypass', async () => {
+  it('same-origin loopback browser keeps the localhost bypass', async () => {
     const app = makeApp({ trustedProxies: [], csrfTrustedOrigins: [] })
     const res = await app.request('/api/trading/uta', {
-      headers: { origin: 'http://127.0.0.1:40123' },
+      headers: { origin: 'http://127.0.0.1:40123', host: '127.0.0.1:40123' },
+    }, envWithIp('127.0.0.1'))
+    expect(res.status).toBe(200)
+  })
+
+  it('another localhost port does not inherit the localhost bypass', async () => {
+    const app = makeApp({ trustedProxies: [], csrfTrustedOrigins: [] })
+    const res = await app.request('/api/trading/uta', {
+      headers: { origin: 'http://127.0.0.1:40123', host: '127.0.0.1:47331' },
+    }, envWithIp('127.0.0.1'))
+    expect(res.status).toBe(401)
+  })
+
+  it('the packaged app:// renderer keeps the localhost bypass', async () => {
+    const app = makeApp({ trustedProxies: [], csrfTrustedOrigins: [] })
+    const res = await app.request('/api/trading/uta', {
+      headers: { origin: 'app://openalice', host: '127.0.0.1:47331' },
     }, envWithIp('127.0.0.1'))
     expect(res.status).toBe(200)
   })

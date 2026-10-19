@@ -1,0 +1,12 @@
+#!/bin/sh
+# Optional local secret gate. Enable with: pnpm secrets:hooks
+# A missing gitleaks binary is a skip, not a failed commit: CI is the
+# authoritative gate, and a fresh checkout must remain committable offline.
+if ! command -v gitleaks >/dev/null 2>&1; then
+  exit 0
+fi
+# Current gitleaks uses `git --staged`; fall back for older installations.
+if gitleaks git --help >/dev/null 2>&1; then
+  exec gitleaks git --staged --config .gitleaks.toml --redact --no-banner
+fi
+exec gitleaks protect --staged --config .gitleaks.toml --redact --no-banner

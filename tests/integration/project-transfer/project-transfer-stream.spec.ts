@@ -68,6 +68,16 @@ describe('AliceProject transfer stream', () => {
     expect(destinationCredentials.connectors).toEqual(expect.objectContaining({
       adapters: expect.objectContaining({ telegram: expect.any(Object) }),
     }))
+    const aiOnDisk = await readFile(join(destination, 'data', 'config', 'ai-provider-manager.json'), 'utf8')
+    expect(aiOnDisk).not.toContain('sk-stream-secret')
+    expect(JSON.parse(aiOnDisk)).toMatchObject({ $sealed: 1 })
+    const providerKeysOnDisk = await readFile(join(destination, 'provider-keys.json'), 'utf8')
+    expect(providerKeysOnDisk).not.toContain('fmp-stream-secret')
+    expect(JSON.parse(providerKeysOnDisk)).toMatchObject({ $sealed: 1 })
+    expect(destinationCredentials.marketData).toMatchObject({ providers: { equity: 'fmp' } })
+    const marketDataOnDisk = await readFile(join(destination, 'data', 'config', 'market-data.json'), 'utf8')
+    expect(marketDataOnDisk).not.toContain('fmp-stream-secret')
+    expect(JSON.parse(marketDataOnDisk)).toMatchObject({ $sealed: 1 })
     expect(await readFile(join(destination, 'sealing.key'), 'utf8')).not.toBe(sourceKey)
   })
 
@@ -89,6 +99,9 @@ describe('AliceProject transfer stream', () => {
     const portableAi = JSON.parse(await readFile(join(destination, 'data', 'config', 'ai-provider-manager.json'), 'utf8'))
     expect(portableAi.credentials).toEqual({})
     expect(portableAi.apiKeys).toEqual({})
+    const portableMarket = JSON.parse(await readFile(join(destination, 'data', 'config', 'market-data.json'), 'utf8'))
+    expect(portableMarket.providerKeys).toEqual({})
+    expect(portableMarket.providers).toEqual({ equity: 'fmp' })
     await expect(stat(join(destination, 'data', '_backup'))).rejects.toMatchObject({ code: 'ENOENT' })
     await expect(stat(join(destination, 'data', 'config', 'sessions.json'))).rejects.toMatchObject({ code: 'ENOENT' })
     await expect(stat(join(destination, 'sealing.key'))).rejects.toMatchObject({ code: 'ENOENT' })
@@ -360,7 +373,9 @@ async function fixture(
   await writeAliceProjectProductStamp(source, 'trader')
   await writeFile(join(source, 'portable.txt'), 'PORTABLE-CONTENT\n')
   if (includeAiVault) {
-    await writeJson(join(source, 'data', 'config', 'ai-provider-manager.json'), {
+    // Post-0045 sources seal the vault; the transfer path must unseal for
+    // planning/stripping and re-seal with the destination key.
+    await sealProjectTransferJson(source, join('data', 'config', 'ai-provider-manager.json'), {
       profiles: { default: { backend: 'native' } },
       apiKeys: { google: 'legacy-stream-secret' },
       credentials: {
@@ -368,8 +383,9 @@ async function fixture(
       },
     })
   }
-  await writeJson(join(source, 'data', 'config', 'market-data.json'), {
+  await sealProjectTransferJson(source, join('data', 'config', 'market-data.json'), {
     providerKeys: { fmp: 'fmp-stream-secret' },
+    providers: { equity: 'fmp' },
   })
   await writeJson(join(source, 'data', '_backup', 'before', 'config', 'ai-provider-manager.json'), {
     apiKeys: { backup: 'backup-only-secret-canary' },

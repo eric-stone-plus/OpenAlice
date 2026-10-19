@@ -1,7 +1,29 @@
-import { appendFileSync, mkdirSync, renameSync, statSync, unlinkSync } from 'node:fs'
+import { appendFileSync, chmodSync, mkdirSync, renameSync, statSync, unlinkSync } from 'node:fs'
 import { dirname } from 'node:path'
 
 const DEFAULT_MAX_LOG_BYTES = 512 * 1024
+
+// Mirrors src/core/scrub.ts. The desktop tsconfig has a src-rooted rootDir,
+// so it cannot import the server module directly; keep the patterns in sync.
+const SCRUB_PATTERNS: ReadonlyArray<readonly [RegExp, string]> = [
+  [/(?<![A-Za-z0-9_-])sk-ant-[A-Za-z0-9_-]{20,}/g, '[redacted]'],
+  [/(?<![A-Za-z0-9_-])sk-(?:proj-|live-)?[A-Za-z0-9_-]{20,}/g, '[redacted]'],
+  [/AKIA[0-9A-Z]{16}/g, '[redacted]'],
+  [/gh[pousr]_[A-Za-z0-9]{20,}/g, '[redacted]'],
+  [/xox[baprs]-[A-Za-z0-9-]{10,}/g, '[redacted]'],
+  [/Authorization:\s*Bearer\s+[A-Za-z0-9._~+/=-]{16,}/gi, 'Authorization: Bearer [redacted]'],
+  [/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g, '[redacted private key]'],
+  [
+    /((?:api[_-]?key|api[_-]?secret|secret[_-]?key|passphrase|password|authorization|bearer|access[_-]?token|refresh[_-]?token|admin[_-]?token|bootstrap[_-]?token)\s*[:=]\s*["']?)[A-Za-z0-9_\-./+]{16,}/gi,
+    '$1[redacted]',
+  ],
+]
+
+function scrubText(text: string): string {
+  let output = text
+  for (const [pattern, replacement] of SCRUB_PATTERNS) output = output.replace(pattern, replacement)
+  return output
+}
 
 export class BoundedTextTail {
   private value = ''
@@ -25,7 +47,7 @@ export class DesktopDiagnostics {
     readonly path: string,
     private readonly maxLogBytes = DEFAULT_MAX_LOG_BYTES,
   ) {
-    mkdirSync(dirname(path), { recursive: true })
+    mkdirSync(dirname(path), { recursive: true, mode: 0o700 })
     try {
       if (statSync(path).size > maxLogBytes) {
         try { unlinkSync(`${path}.previous`) } catch { /* no previous log */ }
@@ -40,7 +62,12 @@ export class DesktopDiagnostics {
     const text = typeof message === 'string' ? message : Buffer.from(message).toString('utf8')
     const normalized = text.endsWith('\n') ? text : `${text}\n`
     try {
-      appendFileSync(this.path, `[${new Date().toISOString()}] [${source}] ${normalized}`, 'utf8')
+      appendFileSync(
+        this.path,
+        `[${new Date().toISOString()}] [${source}] ${scrubText(normalized)}`,
+        { encoding: 'utf8', mode: 0o600 },
+      )
+      chmodSync(this.path, 0o600)
     } catch {
       // Diagnostics must never become a new startup failure.
     }

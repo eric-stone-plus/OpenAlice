@@ -128,6 +128,22 @@ describe('WorkspaceAbsorbManager', () => {
     expect(plan.files.some((file) => file.path === 'AGENTS.md')).toBe(false)
   })
 
+  it('never plans or previews credential stores at any depth', async () => {
+    await mkdir(join(source.dir, 'config'), { recursive: true })
+    await mkdir(join(source.dir, '.pi'), { recursive: true })
+    await writeFile(join(source.dir, 'config', '.env'), 'OPENALICE_FIXTURE_NESTED=secret\n')
+    await writeFile(join(source.dir, '.pi', 'openalice-provider.json'), '{"apiKey":"secret"}\n')
+    await writeFile(join(source.dir, 'wallet.json'), '{"privateKey":"secret"}\n')
+    await writeFile(join(source.dir, 'cert.pem'), '-----BEGIN PRIVATE KEY-----\nsecret\n')
+
+    const plan = await manager().plan(target.id, source.id)
+    const paths = plan.files.map((file) => file.path)
+    for (const path of ['config/.env', '.pi/openalice-provider.json', 'wallet.json', 'cert.pem']) {
+      expect(paths, path).not.toContain(path)
+    }
+    expect(JSON.stringify(plan)).not.toContain('secret')
+  })
+
   it('copies reviewed files, archives source identity, and records one audit commit', async () => {
     await writeFile(join(target.dir, 'local-notes.md'), 'target local edit\n')
     const absorb = manager()

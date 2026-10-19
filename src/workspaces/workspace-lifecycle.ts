@@ -3,6 +3,7 @@ import { cp, mkdir, rename, rm, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 
 import { gitStatus, type GitStatus } from './git-service.js'
+import { revokeWorkspaceCredentials } from './workspace-credentials.js'
 import type { HeadlessTaskRecord, HeadlessTaskRegistry } from './headless-task-registry.js'
 import { isTerminalStatus, readWorkspaceIssues } from './issues/declaration.js'
 import type { Logger } from './logger.js'
@@ -218,10 +219,22 @@ export class WorkspaceLifecycleManager {
     }
 
     try {
+      // Stop sessions first so a live agent cannot recreate a provider file
+      // between revocation and the move.
+      await this.pauseWorkspaceSessions(meta.id)
+      // Revoke before the move: an archive is restorable/shareable, so it must
+      // not carry provider keys. A failure cancels the transition instead of
+      // letting recovery archive a checkout that still has keys.
+      await revokeWorkspaceCredentials(meta.dir)
+    } catch (err) {
+      await this.deps.catalog.cancelOffboarding(meta.id)
+      throw err
+    }
+
+    try {
       // Registry removal is the logical door lock. From here onward ordinary
       // routes, issue scans, and the outer manager's active directory converge.
       await this.deps.registry.remove(meta.id)
-      await this.pauseWorkspaceSessions(meta.id)
       await mkdir(this.departedRoot, { recursive: true })
       await moveDirectory(meta.dir, departedDir)
       await this.deps.resumeRegistry.retireWorkspace(meta.id, {

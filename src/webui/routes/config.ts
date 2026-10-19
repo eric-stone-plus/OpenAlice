@@ -13,6 +13,7 @@ import {
   type WorkspaceCredentialDefault,
 } from '../../core/config.js'
 import { compatibleCredentials, pickAgentWire, resolveInjectionModel } from '../../workspaces/credential-injection.js'
+import { redactConfigSection } from '../../core/redaction.js'
 
 /** Validate a `{ [wireShape]: baseUrl }` body into a typed wires map. */
 function parseWires(raw: unknown): Partial<Record<CredentialWireShape, string>> {
@@ -84,20 +85,16 @@ function maybeHandleOnboardingMockCredentialTest(body: {
 }
 
 /** Config routes: GET /, PUT /:section, profile CRUD, presets, test */
-function redactProviderCredentials(provider: unknown): unknown {
-  if (!provider || typeof provider !== 'object' || Array.isArray(provider)) return provider
-  const { apiKey, apiSecret, password, secretKey, ...rest } = provider as Record<string, unknown>
-  return {
-    ...rest,
-    ...(apiKey ? { hasApiKey: true } : {}),
-    ...(apiSecret ? { hasApiSecret: true } : {}),
-    ...(password ? { hasPassword: true } : {}),
-    ...(secretKey ? { hasSecretKey: true } : {}),
-  }
-}
-
 export function createConfigRoutes(opts?: ConfigRouteOpts) {
   const app = new Hono()
+  // Config responses carry presence flags, never values, but a browser cache
+  // or HAR must not retain even the redacted shape (it reveals which
+  // providers are configured and the vault structure).
+  app.use('*', async (c, next) => {
+    await next()
+    c.header('Cache-Control', 'no-store')
+    c.header('Pragma', 'no-cache')
+  })
   const adapters = opts?.adapterRegistry ?? createBuiltinAdapterRegistry()
   const runtimeAdapters = adapters.list().filter(isAgentRuntime)
   const providerAdapters = runtimeAdapters.filter(
@@ -111,26 +108,17 @@ export function createConfigRoutes(opts?: ConfigRouteOpts) {
   app.get('/', async (c) => {
     try {
       const config = await loadConfig()
-      // Never ship credential material in the general config payload. The
-      // desktop build is native-only; the AI-provider page is a read-only
-      // native status surface and does not need the vault. Legacy broker
-      // credentials are redacted too; market-data provider keys remain because
-      // the Market Data editor uses them directly.
-      const aiProvider = {
-        ...config.aiProvider,
-        apiKeys: {},
-        credentials: {},
-        workspaceCredentialDefaults: {},
-      }
-      const crypto = {
-        ...config.crypto,
-        provider: redactProviderCredentials(config.crypto.provider),
-      }
-      const securities = {
-        ...config.securities,
-        provider: redactProviderCredentials(config.securities.provider),
-      }
-      return c.json({ ...config, aiProvider, crypto, securities })
+      // Never ship credential material in the general config payload. Each
+      // section is redacted structurally: the AI vault becomes empty
+      // containers, broker provider fields become `has<Field>` flags, and
+      // Market Data returns `providerKeyStatus` instead of the key map.
+      return c.json({
+        ...config,
+        aiProvider: redactConfigSection('aiProvider', config.aiProvider),
+        crypto: redactConfigSection('crypto', config.crypto),
+        securities: redactConfigSection('securities', config.securities),
+        marketData: redactConfigSection('marketData', config.marketData),
+      })
     } catch (err) {
       return c.json({ error: String(err) }, 500)
     }
@@ -497,7 +485,8 @@ export function createConfigRoutes(opts?: ConfigRouteOpts) {
       // marketData edits are picked up lazily by the provider resolver
       // (it reads ctx.config per request), so no explicit hot-reload hook
       // is needed. Connector Service owns its own restart flag and API.
-      return c.json(validated)
+      // Never echo the submitted secrets back, even on the write path.
+      return c.json(redactConfigSection(section, validated))
     } catch (err) {
       if (err instanceof Error && err.name === 'ZodError') {
         return c.json({ error: 'Validation failed', details: JSON.parse(err.message) }, 400)

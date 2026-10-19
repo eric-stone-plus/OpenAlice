@@ -95,10 +95,11 @@ export async function writeProjectTransferStream(input: {
       if (entry.transform) {
         const source = await sourceHandle.readFile()
         assertSourceFile(entry, source.byteLength, sha256(source))
-        const portable = transformProjectTransferFile({
+        const portable = await transformProjectTransferFile({
           path: entry.path,
           transform: entry.transform,
           bytes: source,
+          sourceHome: input.plan.source.home,
           destinationHome: input.plan.destination.home,
         })
         assertPortableFile(entry, portable.byteLength, sha256(portable))
@@ -359,7 +360,8 @@ async function verifyPublishedDestination(
       // vault; the private bundle verification below owns its final bytes.
       if (
         plan.policy.credentials === 'include'
-        && entry.path === 'data/config/ai-provider-manager.json'
+        && (entry.path === 'data/config/ai-provider-manager.json'
+          || entry.path === 'data/config/market-data.json')
       ) continue
       const path = join(destination, ...entry.path.split('/'))
       const info = await lstat(path)
@@ -481,9 +483,14 @@ async function prepareStaging(staging: string, destination: string, transferId: 
 
 async function writeCredentialBundle(home: string, bundle: ProjectTransferCredentialBundle): Promise<void> {
   await writeAiProviderVault(home, bundle.ai)
-  await writePrivateJson(join(home, 'provider-keys.json'), bundle.providerKeys)
+  await sealProjectTransferJson(home, 'provider-keys.json', bundle.providerKeys)
   await sealProjectTransferJson(home, join('data', 'config', 'accounts.json'), bundle.brokerAccounts)
   await sealProjectTransferJson(home, join('data', 'config', 'connectors.json'), bundle.connectors)
+  // The portable market-data copy is stripped plaintext; replace it with the
+  // destination-sealed settings so include-mode verification can read it back.
+  const marketData = { ...bundle.marketData }
+  delete marketData['providerKeys']
+  await sealProjectTransferJson(home, join('data', 'config', 'market-data.json'), marketData)
 }
 
 async function readPublishedReceipt(destination: string): Promise<ProjectTransferReceipt | null> {
@@ -534,6 +541,11 @@ function parseCredentialBundle(bytes: Buffer): ProjectTransferCredentialBundle {
       Object.entries(requireRecord(root['providerKeys'], 'provider key payload'))
         .filter((entry): entry is [string, string] => typeof entry[1] === 'string'),
     ),
+    marketData: root['marketData'] !== null
+      && typeof root['marketData'] === 'object'
+      && !Array.isArray(root['marketData'])
+      ? root['marketData'] as Record<string, unknown>
+      : {},
   }
 }
 

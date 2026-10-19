@@ -262,7 +262,12 @@ const api = {
 // A separated window must use the relay's HTTP/WS transport. It retains only
 // desktop chrome, updates, and the explicit path back to local integration;
 // backend-specific file and PTY IPC never reach a remote-connected renderer.
-if (window.location.protocol === 'app:') {
+// The full API is only for the app shell: an app:// API/media document is a
+// data surface, not a trusted renderer.
+const trustedAppDocument = window.location.protocol === 'app:' &&
+  window.location.hostname === 'openalice' &&
+  !window.location.pathname.startsWith('/api/')
+if (trustedAppDocument) {
   contextBridge.exposeInMainWorld('openAlice', api)
 } else if (window.location.protocol === 'http:' && window.location.hostname === '127.0.0.1') {
   contextBridge.exposeInMainWorld('openAlice', {

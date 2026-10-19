@@ -33,6 +33,8 @@ export interface ProjectTransferCredentialBundle {
   brokerAccounts: unknown[]
   connectors: Record<string, unknown>
   providerKeys: Record<string, string>
+  /** Non-secret market-data settings, with providerKeys moved into the map above. */
+  marketData: Record<string, unknown>
 }
 
 export interface ProjectTransferAiVault extends AiProviderVault {
@@ -48,7 +50,7 @@ export interface ProjectTransferCredentialSummary {
 
 interface SealedEnvelope {
   $sealed: 1
-  alg: typeof ALG
+  alg: string
   iv: string
   tag: string
   data: string
@@ -61,17 +63,21 @@ export async function readProjectTransferCredentialBundle(
     readAiProviderVault(home),
     readOptionalSecretJson(home, join('data', 'config', 'accounts.json')),
     readOptionalSecretJson(home, join('data', 'config', 'connectors.json')),
-    readOptionalJson(join(home, 'provider-keys.json')),
-    readOptionalJson(join(home, 'data', 'config', 'market-data.json')),
+    readOptionalSecretJson(home, 'provider-keys.json'),
+    readOptionalSecretJson(home, join('data', 'config', 'market-data.json')),
   ])
+  const marketDataRecord = recordValue(marketData)
+  const marketDataSettings = { ...marketDataRecord }
+  delete marketDataSettings['providerKeys']
   return {
     ai: normalizeProjectTransferAiVault(aiVault),
     brokerAccounts: Array.isArray(brokerValue) ? brokerValue : [],
     connectors: recordValue(connectorValue),
     providerKeys: stringMap({
       ...recordValue(globalProviderKeys),
-      ...recordValue(recordValue(marketData)['providerKeys']),
+      ...recordValue(marketDataRecord['providerKeys']),
     }),
+    marketData: marketDataSettings,
   }
 }
 
@@ -145,9 +151,29 @@ export async function sealProjectTransferJson(
 
 async function readOptionalSecretJson(home: string, relativePath: string): Promise<unknown> {
   const value = await readOptionalJson(join(home, relativePath))
-  if (!isSealedEnvelope(value)) return value
+  return unsealProjectTransferJson(home, value, relativePath)
+}
+
+/**
+ * Decrypt a sealed JSON value with the Home's machine key. Exported because
+ * portable-file transforms run on raw bytes and must unseal before stripping
+ * credentials; copying the envelope verbatim would ship ciphertext that the
+ * destination cannot decrypt and would defeat the strip transform.
+ */
+export async function unsealProjectTransferJson(
+  home: string,
+  value: unknown,
+  label = 'credential configuration',
+): Promise<unknown> {
+  if (!isSealedMarker(value)) return value
+  if (!isSealedEnvelope(value)) {
+    throw transferSecretError(`${label} is a malformed sealed envelope.`)
+  }
+  if (value.alg !== ALG) {
+    throw transferSecretError(`${label} uses unsupported sealing algorithm "${value.alg}".`)
+  }
   const key = await readSourceKey(home)
-  if (!key) throw transferSecretError(`Credential file ${relativePath} is sealed but the source sealing key is missing.`)
+  if (!key) throw transferSecretError(`${label} is sealed but the source sealing key is missing.`)
   try {
     const decipher = createDecipheriv(ALG, key, Buffer.from(value.iv, 'base64'))
     decipher.setAuthTag(Buffer.from(value.tag, 'base64'))
@@ -157,7 +183,7 @@ async function readOptionalSecretJson(home: string, relativePath: string): Promi
     ])
     return JSON.parse(plaintext.toString('utf8')) as unknown
   } catch (error: unknown) {
-    throw transferSecretError(`Credential file ${relativePath} could not be unsealed.`, error)
+    throw transferSecretError(`${label} could not be unsealed.`, error)
   }
 }
 
@@ -213,13 +239,19 @@ async function writePrivateJson(path: string, value: unknown): Promise<void> {
   }
 }
 
+function isSealedMarker(value: unknown): value is Record<string, unknown> {
+  return value !== null
+    && typeof value === 'object'
+    && !Array.isArray(value)
+    && (value as Record<string, unknown>)['$sealed'] === 1
+}
+
 function isSealedEnvelope(value: unknown): value is SealedEnvelope {
-  const record = recordValue(value)
-  return record['$sealed'] === 1
-    && record['alg'] === ALG
-    && typeof record['iv'] === 'string'
-    && typeof record['tag'] === 'string'
-    && typeof record['data'] === 'string'
+  if (!isSealedMarker(value)) return false
+  return typeof value['alg'] === 'string'
+    && typeof value['iv'] === 'string'
+    && typeof value['tag'] === 'string'
+    && typeof value['data'] === 'string'
 }
 
 function stringMap(value: Record<string, unknown>): Record<string, string> {

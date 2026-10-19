@@ -6,6 +6,7 @@ import { dirname, join, posix } from 'node:path'
 import { exec as gitExec, type IGitStringExecutionOptions } from './git-execution.js'
 
 import { gitStatus } from './git-service.js'
+import { isSecretWorkspacePath } from './secret-paths.js'
 import type { Logger } from './logger.js'
 import type { WorkspaceLifecycleManager } from './workspace-lifecycle.js'
 import type { WorkspaceCatalog } from './workspace-catalog.js'
@@ -477,6 +478,10 @@ async function listSourceFiles(dir: string): Promise<{
 
 function isTransferablePath(path: string): boolean {
   if (!isSafeRelativePath(path)) return false
+  // Credential stores and key material are never transferable, at any depth.
+  // A root-only `.env` check missed `config/.env`, `secrets/api.txt`, and
+  // per-workspace provider files that Absorb would otherwise commit.
+  if (isSecretWorkspacePath(path)) return false
   const rootFiles = new Set([
     'README.md', 'AGENTS.md', 'CLAUDE.md', '.gitignore', '.gitattributes',
     'opencode.json',
@@ -505,6 +510,9 @@ function safeJoin(root: string, path: string): string {
 }
 
 async function readRegularFile(root: string, path: string): Promise<FileSnapshot | null> {
+  // Defense in depth: even if a caller bypasses the transferable-path filter,
+  // a secret file must never be read into a plan/preview.
+  if (isSecretWorkspacePath(path)) return null
   if (await hasUnsafeAncestor(root, path)) return null
   const absolute = safeJoin(root, path)
   try {
@@ -530,6 +538,7 @@ async function readAnyPath(root: string, path: string): Promise<
   | { kind: 'other' }
   | null
 > {
+  if (isSecretWorkspacePath(path)) return { kind: 'other' }
   if (await hasUnsafeAncestor(root, path)) return { kind: 'other' }
   const absolute = safeJoin(root, path)
   try {

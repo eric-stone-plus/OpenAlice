@@ -205,8 +205,8 @@ describe('AliceProject transfer planner', () => {
     (path) => expect(() => validateManifestPath(path)).toThrow('Unsafe transfer path'),
   )
 
-  it('rewrites remote Workspace paths with POSIX semantics on every sender OS', () => {
-    const transformed = transformProjectTransferFile({
+  it('rewrites remote Workspace paths with POSIX semantics on every sender OS', async () => {
+    const transformed = await transformProjectTransferFile({
       path: 'workspaces/state/workspace-catalog.json',
       transform: 'workspace-catalog-paths',
       bytes: Buffer.from(JSON.stringify({
@@ -221,6 +221,7 @@ describe('AliceProject transfer planner', () => {
           },
         ],
       })),
+      sourceHome: '/srv/openalice/source',
       destinationHome: '/srv/openalice/main-cloud',
     })
     const catalog = JSON.parse(transformed.toString('utf8'))

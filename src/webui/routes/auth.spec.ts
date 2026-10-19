@@ -122,13 +122,22 @@ describe('login cookie Secure flag — X-Forwarded-Proto trust gating', () => {
 })
 
 describe('auth status localhost boundary', () => {
-  it('accepts a local page through a loopback socket', async () => {
+  it('accepts the app’s exact local origin through a loopback socket', async () => {
     const app = makeApp()
     const res = await app.request('/api/auth/status', {
-      headers: { origin: 'http://127.0.0.1:40123' },
+      headers: { origin: 'http://127.0.0.1:40123', host: '127.0.0.1:40123' },
     }, envWithIp('127.0.0.1'))
     expect(res.status).toBe(200)
     expect(await res.json()).toMatchObject({ authed: true, passthrough: 'localhost' })
+  })
+
+  it('does not report localhost auth to another localhost port', async () => {
+    const app = makeApp()
+    const res = await app.request('/api/auth/status', {
+      headers: { origin: 'http://127.0.0.1:40123', host: '127.0.0.1:47331' },
+    }, envWithIp('127.0.0.1'))
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({ authed: false })
   })
 
   it('does not report localhost auth to a public browser origin', async () => {

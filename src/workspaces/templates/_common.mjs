@@ -15,7 +15,7 @@
  * helpers).
  */
 
-import { existsSync, mkdirSync, copyFileSync, appendFileSync } from 'node:fs'
+import { existsSync, mkdirSync, copyFileSync, appendFileSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 const injectedGitExec = globalThis.__OPENALICE_BOOTSTRAP_GIT_EXEC__
 const exec = typeof injectedGitExec === 'function'
@@ -59,6 +59,27 @@ export function copyReadme(outDir, templateRoot = process.env.AQ_TEMPLATE_ROOT) 
   copyFileSync(src, join(outDir, 'README.md'))
 }
 
+const GITIGNORE_MARKER = '# OpenAlice credential protection (managed)'
+const GITIGNORE_BLOCK = `${GITIGNORE_MARKER}
+.env
+.env.*
+secrets/
+credentials/
+provider-keys.json
+openalice-provider.json
+wallet*.json
+credentials*.json
+secrets*.json
+auth.json
+*.pem
+*.p12
+*.pfx
+*.keystore
+*.kdbx
+id_rsa*
+id_ed25519*
+`
+
 const DEFAULT_EXCLUDES = [
   '.claude/settings.local.json',
   '.claude/openalice-provider.json',
@@ -92,4 +113,13 @@ export function setupGitExcludes(outDir, ...extra) {
   }
   const lines = [...DEFAULT_EXCLUDES, ...extra].join('\n') + '\n'
   appendFileSync(join(outDir, '.git', 'info', 'exclude'), lines)
+
+  // `info/exclude` is per-clone and never travels. A committed marker block
+  // keeps the same protection after the Workspace is cloned elsewhere.
+  const gitignore = join(outDir, '.gitignore')
+  const existing = existsSync(gitignore) ? readFileSync(gitignore, 'utf8') : ''
+  if (!existing.includes(GITIGNORE_MARKER)) {
+    const prefix = existing.length > 0 && !existing.endsWith('\n') ? '\n' : ''
+    appendFileSync(gitignore, `${prefix}${existing.length > 0 ? '\n' : ''}${GITIGNORE_BLOCK}`)
+  }
 }

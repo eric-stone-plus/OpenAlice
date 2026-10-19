@@ -12,6 +12,12 @@ describe('resolveMediaPath', () => {
     const result = resolveMediaPath('2026-01-01/ace-aim-air.png')
     expect(result).toContain(join('data', 'media', '2026-01-01', 'ace-aim-air.png'))
   })
+
+  it('rejects traversal outside the media directory', () => {
+    expect(() => resolveMediaPath('../config/ai-provider-manager.json')).toThrow(/Invalid media path/)
+    expect(() => resolveMediaPath('2026-01-01/../../config/ai-provider-manager.json')).toThrow(/Invalid media path/)
+    expect(() => resolveMediaPath('/etc/passwd')).toThrow(/Invalid media path/)
+  })
 })
 
 // ==================== persistMedia ====================

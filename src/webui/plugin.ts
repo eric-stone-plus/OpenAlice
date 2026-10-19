@@ -38,7 +38,7 @@ import { createPreferencesRoutes } from './routes/preferences.js'
 import { createUpdateRoutes } from './routes/updates.js'
 import { createUiLayoutRoutes } from './routes/ui-layout.js'
 import { initializeWindowsWorkspaceShellPreference } from '../core/windows-workspace-shell.js'
-import { createAuthMiddleware } from './middleware/auth.js'
+import { createAuthMiddleware, isTrustedLocalOrigin } from './middleware/auth.js'
 import { mountMarketDataCompat } from '../server/market-data-compat.js'
 import { buildSDKCredentials } from '../domain/market-data/credential-map.js'
 import { resolveUTAUrl } from '../services/uta-supervisor/url.js'
@@ -118,6 +118,17 @@ export class WebPlugin implements Plugin {
     const { bootstrapToken, getTokenInfo } = await import('@/services/auth/index.js')
     await bootstrapToken({
       onFirstGeneration: (token) => {
+        // The desktop captures every stdout line into a diagnostics file. A
+        // token printed into a pipe is therefore persisted, not "shown once".
+        // Print only to an interactive terminal (or an explicit opt-in); the
+        // packaged desktop uses the loopback session and does not need it.
+        if (!process.stdout.isTTY && process.env['OPENALICE_PRINT_ADMIN_TOKEN'] !== '1') {
+          console.log(
+            'First-run admin token generated. It was not printed to a non-interactive log; ' +
+            'run once in a terminal or set OPENALICE_PRINT_ADMIN_TOKEN=1 to display it.',
+          )
+          return
+        }
         console.log('')
         console.log('═══════════════════════════════════════════════════════════════')
         console.log('  First-run admin token (save this — won\'t be shown again):')
@@ -136,15 +147,21 @@ export class WebPlugin implements Plugin {
     // OPENALICE_BIND_HOST=0.0.0.0 for testing and forgot auth" footgun.
     const bindHost = (process.env['OPENALICE_BIND_HOST'] ?? '127.0.0.1').trim()
     const bindIsPublic = bindHost !== '127.0.0.1' && bindHost !== '::1' && bindHost !== 'localhost'
+    if (bindIsPublic && process.env['OPENALICE_DISABLE_AUTH'] === '1') {
+      throw new Error(
+        `Refusing to start: OPENALICE_BIND_HOST="${bindHost}" exposes Alice to ` +
+        `non-localhost callers while OPENALICE_DISABLE_AUTH=1 removes the ` +
+        `authentication boundary. Bind to loopback or remove the disable flag.`,
+      )
+    }
     if (bindIsPublic) {
       const tokenInfo = await getTokenInfo()
-      if (!tokenInfo.exists && process.env['OPENALICE_DISABLE_AUTH'] !== '1') {
+      if (!tokenInfo.exists) {
         throw new Error(
           `Refusing to start: OPENALICE_BIND_HOST="${bindHost}" exposes Alice ` +
           `to non-localhost callers, but no admin token has been provisioned. ` +
           `Start once with OPENALICE_BIND_HOST=127.0.0.1 to generate the token, ` +
-          `then re-set the bind. Set OPENALICE_DISABLE_AUTH=1 only when you ` +
-          `understand the implication (no protection at the Alice boundary).`
+          `then re-set the bind. OPENALICE_DISABLE_AUTH is refused on a public bind.`
         )
       }
     }
@@ -194,7 +211,22 @@ export class WebPlugin implements Plugin {
       return proxyHarnessSurface(c.req.raw, target)
     })
 
-    app.use('/api/*', cors())
+    const trustedProxies = (process.env['OPENALICE_TRUSTED_PROXIES'] ?? '')
+      .split(',').map((s) => s.trim()).filter(Boolean)
+    const csrfTrustedOrigins = (process.env['OPENALICE_CSRF_TRUSTED_ORIGINS'] ?? '')
+      .split(',').map((s) => s.trim()).filter(Boolean)
+    const authDisabled = process.env['OPENALICE_DISABLE_AUTH'] === '1'
+
+    // CORS must not turn a localhost bypass into a cross-origin read primitive.
+    // Only the app's exact origin, the packaged app:// renderer, or an explicit
+    // operator allowlist gets an Access-Control-Allow-Origin header.
+    app.use('/api/*', cors({
+      origin: (origin, c) => {
+        if (!origin) return undefined
+        if (isTrustedLocalOrigin(origin, c.req.header('host'))) return origin
+        return csrfTrustedOrigins.includes(origin) ? origin : undefined
+      },
+    }))
 
     if (this.config.localCliOnWeb) {
       if (bindIsPublic) {
@@ -222,11 +254,6 @@ export class WebPlugin implements Plugin {
     // bypass when no trusted proxy is configured — preserving the
     // zero-friction dev UX. See safe/playbooks/{01,02,03}-*.md for the
     // testable contract.
-    const trustedProxies = (process.env['OPENALICE_TRUSTED_PROXIES'] ?? '')
-      .split(',').map((s) => s.trim()).filter(Boolean)
-    const csrfTrustedOrigins = (process.env['OPENALICE_CSRF_TRUSTED_ORIGINS'] ?? '')
-      .split(',').map((s) => s.trim()).filter(Boolean)
-    const authDisabled = process.env['OPENALICE_DISABLE_AUTH'] === '1'
     app.route('/api/auth', createAuthRoutes({ trustedProxies }))
     app.use('*', createAuthMiddleware({
       trustedProxies,

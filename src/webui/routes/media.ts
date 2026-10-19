@@ -24,13 +24,28 @@ export function createMediaRoutes() {
 
   app.get('/:date/:name', async (c) => {
     const { date, name } = c.req.param()
-    const filePath = resolveMediaPath(join(date, name))
+    let filePath: string
+    try {
+      filePath = resolveMediaPath(join(date, name))
+    } catch {
+      return c.notFound()
+    }
 
     try {
       const buf = await readFile(filePath)
       const ext = extname(name).toLowerCase()
       const mime = MIME[ext] ?? 'application/octet-stream'
-      return c.body(buf, { headers: { 'Content-Type': mime } })
+      // SVG is a document format: a directly navigated SVG can execute script
+      // in the app:// origin. Never serve it inline; the CSP is defense in
+      // depth for every other document-shaped media type.
+      const headers: Record<string, string> = {
+        'Content-Type': mime,
+        'X-Content-Type-Options': 'nosniff',
+        'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+        'Cache-Control': 'private, max-age=300',
+      }
+      if (ext === '.svg') headers['Content-Disposition'] = 'attachment; filename="media.svg"'
+      return c.body(buf, { headers })
     } catch {
       return c.notFound()
     }

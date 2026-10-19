@@ -28,7 +28,7 @@ vi.mock('./sealing.js', () => ({
   unseal: async (v: unknown) => v,
 }))
 
-import { readFile, writeFile, mkdir } from 'fs/promises'
+import { readFile, writeFile, mkdir, rename } from 'fs/promises'
 import {
   readAIProviderConfig,
   readToolsConfig,
@@ -47,6 +47,7 @@ import {
 const mockReadFile = vi.mocked(readFile)
 const mockWriteFile = vi.mocked(writeFile)
 const mockMkdir = vi.mocked(mkdir)
+const mockRename = vi.mocked(rename)
 
 /** Simulate a file read that returns JSON content. */
 function fileReturns(content: unknown) {
@@ -172,7 +173,7 @@ describe('writeConfigSection', () => {
     const result = await writeConfigSection('tools', { disabled: ['foo'] })
 
     expect(mockWriteFile).toHaveBeenCalledOnce()
-    const filePath = mockWriteFile.mock.calls[0][0] as string
+    const filePath = mockRename.mock.calls[0][1] as string
     expect(filePath).toMatch(/tools\.json$/)
 
     const written = JSON.parse(mockWriteFile.mock.calls[0][1] as string)
@@ -195,7 +196,7 @@ describe('writeConfigSection', () => {
 
   it('writes local listener ports separately from external connectors', async () => {
     await writeConfigSection('ports', { web: 3005 })
-    const filePath = mockWriteFile.mock.calls[0][0] as string
+    const filePath = mockRename.mock.calls[0][1] as string
     expect(filePath).toMatch(/ports\.json$/)
   })
 })
@@ -239,7 +240,7 @@ describe('readUTAsConfig', () => {
     // CCXT secret alias (apiSecret → secret)
     expect(accounts[0].presetConfig.secret).toBe('s')
     // Backup + rewritten accounts.json both written
-    const writePaths = mockWriteFile.mock.calls.map((c) => c[0] as string)
+    const writePaths = mockRename.mock.calls.map((c) => c[1] as string)
     expect(writePaths.some((p) => p.endsWith('accounts.json.backup-pre-preset'))).toBe(true)
     expect(writePaths.some((p) => p.endsWith('accounts.json'))).toBe(true)
   })
@@ -270,7 +271,7 @@ describe('writeUTAsConfig', () => {
       presetConfig: { mode: 'paper', apiKey: 'k', apiSecret: 's' },
       keyless: false, readOnly: false, asVendor: true, editable: true,
     }])
-    const filePath = mockWriteFile.mock.calls[0][0] as string
+    const filePath = mockRename.mock.calls[0][1] as string
     expect(filePath).toMatch(/accounts\.json$/)
   })
 

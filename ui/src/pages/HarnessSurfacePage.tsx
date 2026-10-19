@@ -180,6 +180,8 @@ export function HarnessSurfacePage({
             src={surfaceUrl}
             title={t('harnessSurface.studio')}
             className="h-full w-full border-0 bg-background"
+            sandbox="allow-scripts allow-forms allow-popups allow-downloads"
+            referrerPolicy="no-referrer"
             allow="clipboard-read; clipboard-write"
           />
         ) : (

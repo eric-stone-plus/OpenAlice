@@ -10,6 +10,7 @@ import {
   copyAiCredentials,
   formatAiCredentialCopyResult,
   mergeAiCredentials,
+  readAiProviderVault,
   writeAiProviderVault,
 } from './ai-credential-copy.ts'
 
@@ -50,6 +51,20 @@ describe('mergeAiCredentials', () => {
 })
 
 describe('copyAiCredentials', () => {
+  it('refuses an unknown sealed algorithm instead of treating it as plaintext', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'ai-copy-alg-'))
+    temporary.push(home)
+    await mkdir(join(home, 'data', 'config'), { recursive: true })
+    await writeFile(join(home, AI_PROVIDER_FILE_REL), `${JSON.stringify({
+      $sealed: 1,
+      alg: 'future-aead',
+      iv: 'AA==',
+      tag: 'AA==',
+      data: 'AA==',
+    })}\n`)
+    await expect(readAiProviderVault(home)).rejects.toThrow(/unsupported algorithm/)
+  })
+
   it('writes only the destination vault and never mentions secrets', async () => {
     const root = await mkdtemp(join(tmpdir(), 'ai-cred-copy-'))
     temporary.push(root)
@@ -76,11 +91,10 @@ describe('copyAiCredentials', () => {
       toHome,
     })
     expect(result.copied).toEqual(['openai-1'])
-    const written = JSON.parse(await readFile(join(toHome, AI_PROVIDER_FILE_REL), 'utf8')) as {
-      credentials: Record<string, { apiKey?: string }>
-      workspaceCredentialDefaults?: Record<string, { credentialSlug: string }>
-      workspaceDefaultAgent?: string
-    }
+    const onDisk = await readFile(join(toHome, AI_PROVIDER_FILE_REL), 'utf8')
+    expect(onDisk).not.toContain('sk-secret-source')
+    expect(JSON.parse(onDisk)).toMatchObject({ $sealed: 1 })
+    const written = await readAiProviderVault(toHome)
     expect(written.credentials['openai-1']?.apiKey).toBe('sk-secret-source')
     expect(written.workspaceCredentialDefaults).toBeUndefined()
     expect(written.workspaceDefaultAgent).toBe('pi')

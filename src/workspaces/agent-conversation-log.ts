@@ -1,4 +1,5 @@
 import type { DispatchCommunication } from './dispatch-communication.js'
+import { scrubValue } from '../core/scrub.js'
 /**
  * Append-only cross-Agent conversation log.
  *
@@ -254,12 +255,16 @@ export class AgentConversationLog {
   private async append(event: AgentConversationLogEvent): Promise<void> {
     const next = this.appendChain.then(async () => {
       try {
-        await mkdir(dirname(this.path), { recursive: true })
-        await appendFile(this.path, `${JSON.stringify(event)}\n`, {
+        await mkdir(dirname(this.path), { recursive: true, mode: 0o700 })
+        // Scrub once and use the same value for disk and the in-memory cache;
+        // otherwise a query before restart returns the unredacted event while
+        // the persisted log is redacted.
+        const safe = scrubValue(event)
+        await appendFile(this.path, `${JSON.stringify(safe)}\n`, {
           encoding: 'utf8',
           mode: 0o600,
         })
-        this.cachedEvents?.push(event)
+        this.cachedEvents?.push(safe)
         this.cacheRevision += 1
       } catch (err) {
         this.logger.warn('agent_conversation_log.append_failed', {

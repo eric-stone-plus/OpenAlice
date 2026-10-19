@@ -58,7 +58,22 @@ packages/ibkr/ref/CMakeLists.txt
 
 # Credential sealing key — lands at the user-data root, which is the repo
 # root whenever OPENALICE_HOME is pinned here (smoke tests, $PWD escape hatch).
-/sealing.key
+**/sealing.key
+
+# Credential stores that can appear outside the sealed data/ tree: the
+# user-global data-vendor keys, workspace-local provider files, broker
+# exports, and key material. Keep these out of every commit.
+/workspaces/
+**/provider-keys.json
+**/openalice-provider.json
+/data/config/auth.json
+**/*.pem
+**/*.p12
+**/*.pfx
+**/*.keystore
+**/*.kdbx
+**/id_rsa*
+**/id_ed25519*
 
 # Isolated Electron demo UI bundle
 /ui/dist-demo/

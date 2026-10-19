@@ -4,9 +4,21 @@
  * The vault is `<home>/data/config/ai-provider-manager.json`. Broker
  * accounts and sealing keys stay untouched. Secrets are never logged.
  */
-import { mkdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
-import { randomUUID } from 'node:crypto'
+import { chmod, mkdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises'
+import { dirname, join } from 'node:path'
+import { createCipheriv, createDecipheriv, randomBytes, randomUUID } from 'node:crypto'
+
+const ALG = 'aes-256-gcm'
+const KEY_BYTES = 32
+const IV_BYTES = 12
+
+interface SealedEnvelope {
+  $sealed: 1
+  alg: string
+  iv: string
+  tag: string
+  data: string
+}
 
 export const AI_PROVIDER_FILE_REL = join('data', 'config', 'ai-provider-manager.json')
 
@@ -86,7 +98,7 @@ export function mergeAiCredentials(
 export async function readAiProviderVault(home: string): Promise<AiProviderVault> {
   const path = join(home, AI_PROVIDER_FILE_REL)
   try {
-    return parseAiProviderVault(JSON.parse(await readFile(path, 'utf8')))
+    return parseAiProviderVault(await readSealedJson(home, path))
   } catch (error: unknown) {
     if (isNodeError(error, 'ENOENT')) return { credentials: {} }
     throw Object.assign(
@@ -97,23 +109,102 @@ export async function readAiProviderVault(home: string): Promise<AiProviderVault
 }
 
 export async function writeAiProviderVault(home: string, vault: AiProviderVault): Promise<void> {
-  const dir = join(home, 'data', 'config')
-  const path = join(dir, 'ai-provider-manager.json')
-  const temporary = join(dir, `.ai-provider-manager.${process.pid}.${randomUUID()}.tmp`)
-  await mkdir(dir, { recursive: true, mode: 0o700 })
+  const path = join(home, AI_PROVIDER_FILE_REL)
   try {
-    await writeFile(
-      temporary,
-      `${JSON.stringify(vault, null, 2)}\n`,
-      { encoding: 'utf8', mode: 0o600, flag: 'wx' },
-    )
-    await rename(temporary, path)
+    await writeSealedJson(home, path, vault)
   } catch (error: unknown) {
-    await rm(temporary, { force: true }).catch(() => undefined)
     throw Object.assign(
       new Error(`Could not write AI credentials at ${path}: ${errorMessage(error)}`),
       { code: 'EAIVAULT', exitCode: 1 },
     )
+  }
+}
+
+function isSealedMarker(value: unknown): value is Record<string, unknown> {
+  return value !== null
+    && typeof value === 'object'
+    && !Array.isArray(value)
+    && (value as Record<string, unknown>)['$sealed'] === 1
+}
+
+function isSealedEnvelope(value: unknown): value is SealedEnvelope {
+  if (!isSealedMarker(value)) return false
+  return typeof value['alg'] === 'string'
+    && typeof value['iv'] === 'string'
+    && typeof value['tag'] === 'string'
+    && typeof value['data'] === 'string'
+}
+
+async function readKey(home: string): Promise<Buffer | undefined> {
+  try {
+    const key = Buffer.from((await readFile(join(home, 'sealing.key'), 'utf8')).trim(), 'base64')
+    if (key.length !== KEY_BYTES) throw new Error(`sealing key at ${join(home, 'sealing.key')} is malformed`)
+    return key
+  } catch (error: unknown) {
+    if (isNodeError(error, 'ENOENT')) return undefined
+    throw error
+  }
+}
+
+async function loadOrCreateKey(home: string): Promise<Buffer> {
+  const existing = await readKey(home)
+  if (existing) return existing
+  const path = join(home, 'sealing.key')
+  const key = randomBytes(KEY_BYTES)
+  await mkdir(join(home), { recursive: true, mode: 0o700 })
+  try {
+    await writeFile(path, `${key.toString('base64')}\n`, { mode: 0o600, flag: 'wx' })
+    await chmod(path, 0o600).catch(() => undefined)
+    return key
+  } catch (error: unknown) {
+    if (isNodeError(error, 'EEXIST')) {
+      const raced = await readKey(home)
+      if (raced) return raced
+    }
+    throw error
+  }
+}
+
+async function readSealedJson(home: string, path: string): Promise<unknown> {
+  const value = JSON.parse(await readFile(path, 'utf8')) as unknown
+  if (!isSealedMarker(value)) return value
+  if (!isSealedEnvelope(value)) {
+    throw new Error(`sealed file at ${path} is malformed`)
+  }
+  if (value.alg !== ALG) {
+    throw new Error(`sealed file at ${path} uses unsupported algorithm "${value.alg}"`)
+  }
+  const key = await readKey(home)
+  if (!key) throw new Error(`sealed file requires the machine key at ${join(home, 'sealing.key')}`)
+  const decipher = createDecipheriv(ALG, key, Buffer.from(value.iv, 'base64'))
+  decipher.setAuthTag(Buffer.from(value.tag, 'base64'))
+  const plaintext = Buffer.concat([decipher.update(Buffer.from(value.data, 'base64')), decipher.final()])
+  return JSON.parse(plaintext.toString('utf8')) as unknown
+}
+
+async function writeSealedJson(home: string, path: string, value: unknown): Promise<void> {
+  const dir = dirname(path)
+  const key = await loadOrCreateKey(home)
+  const iv = randomBytes(IV_BYTES)
+  const cipher = createCipheriv(ALG, key, iv)
+  const plaintext = Buffer.from(JSON.stringify(value), 'utf8')
+  const data = Buffer.concat([cipher.update(plaintext), cipher.final()])
+  const envelope: SealedEnvelope = {
+    $sealed: 1,
+    alg: ALG,
+    iv: iv.toString('base64'),
+    tag: cipher.getAuthTag().toString('base64'),
+    data: data.toString('base64'),
+  }
+  const temporary = join(dir, `.ai-provider-manager.${process.pid}.${randomUUID()}.tmp`)
+  await mkdir(dir, { recursive: true, mode: 0o700 })
+  try {
+    await writeFile(temporary, `${JSON.stringify(envelope, null, 2)}\n`, { encoding: 'utf8', mode: 0o600, flag: 'wx' })
+    await rename(temporary, path)
+    await chmod(path, 0o600).catch(() => undefined)
+  } catch (error: unknown) {
+    await rm(temporary, { force: true }).catch(() => undefined)
+    throw error
   }
 }
 

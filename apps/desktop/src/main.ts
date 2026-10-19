@@ -1213,13 +1213,28 @@ app.whenReady().then(async () => {
   const mayNavigate = (destination: string): boolean => {
     try {
       const url = new URL(destination)
-      return (url.protocol === 'app:' && url.host === 'openalice') || url.origin === desktopRelay?.originUrl
+      if (url.protocol === 'app:' && url.host === 'openalice') {
+        // The app shell only. A top-level navigation to an API/media document
+        // must never run in the app:// origin with the preload API attached.
+        return !url.pathname.startsWith('/api/')
+      }
+      return url.origin === desktopRelay?.originUrl
     } catch { return false }
   }
   win.webContents.on('will-navigate', (event, destination) => {
     if (mayNavigate(destination)) return
     event.preventDefault()
     if (/^https:\/\//i.test(destination)) void shell.openExternal(destination)
+  })
+  win.webContents.on('will-frame-navigate', (details) => {
+    if (details.isMainFrame) return
+    try {
+      const url = new URL(details.url)
+      // Subframes may load harness surfaces over http(s), but never an app://
+      // document: that is how a workspace-controlled SVG would inherit the
+      // app origin and the preload API.
+      if (url.protocol === 'app:' && url.host === 'openalice') details.preventDefault()
+    } catch { /* let the normal navigation policy handle malformed URLs */ }
   })
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https:\/\//i.test(url)) void shell.openExternal(url)

@@ -5,7 +5,7 @@ import { Readable, Writable } from 'node:stream'
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { AI_PROVIDER_FILE_REL } from '../../../packages/cli/src/ai-credential-copy.ts'
+import { AI_PROVIDER_FILE_REL, readAiProviderVault } from '../../../packages/cli/src/ai-credential-copy.ts'
 import { writeAliceProjectProductStamp } from '../../../packages/cli/src/alice-project-product.ts'
 import { formatProjectHelp, runProjectCommand } from '../../../packages/cli/src/project-command.ts'
 import { planProjectTransfer } from '../../../packages/cli/src/project-transfer.ts'
@@ -339,8 +339,9 @@ async function setupProjects() {
       return readFile(supervisorConfigPath(ready.supervisorRoot), 'utf8')
     },
     async readOfficeVault() {
-      const { readFile } = await import('node:fs/promises')
-      return readFile(join(officeHome, AI_PROVIDER_FILE_REL), 'utf8')
+      // The destination vault is sealed; read it through the same helper the
+      // CLI uses so the test asserts the credential, not the envelope shape.
+      return JSON.stringify(await readAiProviderVault(officeHome))
     },
   }
 }

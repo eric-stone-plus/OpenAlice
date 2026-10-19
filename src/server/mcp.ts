@@ -1,5 +1,4 @@
 import { Hono } from 'hono'
-import { cors } from 'hono/cors'
 import { serve } from '@hono/node-server'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js'
@@ -198,12 +197,13 @@ export class McpPlugin implements Plugin {
 
     const app = new Hono()
 
-    app.use('*', cors({
-      origin: '*',
-      allowMethods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
-      allowHeaders: ['Content-Type', 'mcp-session-id', 'Last-Event-ID', 'mcp-protocol-version', 'x-openalice-run', 'x-openalice-session'],
-      exposeHeaders: ['mcp-session-id', 'mcp-protocol-version'],
-    }))
+    // Native MCP clients send no Origin. A browser page always does, and the
+    // loopback listener has no token gate; reject it before the transport so
+    // a website cannot drive the trading-capable tool surface.
+    app.use('*', async (c, next) => {
+      if (c.req.header('origin')) return c.json({ error: 'origin_not_allowed' }, 403)
+      await next()
+    })
 
     app.all('/mcp', async (c) => {
       const transport = new WebStandardStreamableHTTPServerTransport()

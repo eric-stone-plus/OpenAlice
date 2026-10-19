@@ -1,6 +1,7 @@
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
+import { scrubText } from '../core/scrub.js';
 import type { Logger } from './logger.js';
 
 /** Max scrollback bytes persisted per shell pause. Anything older is truncated. */
@@ -35,13 +36,21 @@ export class ScrollbackStore {
   async dump(wsId: string, sessionId: string, bytes: Buffer): Promise<string> {
     const rel = `${wsId}/${sessionId}.bin`;
     const abs = join(this.dir, rel);
-    await mkdir(dirname(abs), { recursive: true });
+    await mkdir(dirname(abs), { recursive: true, mode: 0o700 });
     const tail =
       bytes.length > SCROLLBACK_CAP_BYTES ? bytes.subarray(bytes.length - SCROLLBACK_CAP_BYTES) : bytes;
+    // A shell command that prints a provider token would otherwise persist it
+    // in scrollback. Scrub known token formats before the bytes hit disk.
+    // latin1 is a lossless byte↔string mapping: binary PTY output survives,
+    // while the ASCII token patterns are still matched.
+    const scrubbed = Buffer.from(scrubText(tail.toString('latin1')), 'latin1');
     // Atomic write: write to tmp, rename. Crash mid-write doesn't leave a
     // half-flushed scrollback file (and prevents readers from racing).
     const tmp = `${abs}.tmp`;
-    await writeFile(tmp, tail);
+    await writeFile(tmp, scrubbed, { mode: 0o600 });
+    // `mode` only applies on creation; a stale tmp from an older build may be
+    // 0644 and would carry that mode through the rename.
+    await chmod(tmp, 0o600).catch(() => undefined);
     const { rename } = await import('node:fs/promises');
     await rename(tmp, abs);
     this.logger.info('scrollback.dumped', {
@@ -55,7 +64,11 @@ export class ScrollbackStore {
 
   async read(rel: string): Promise<Buffer | null> {
     try {
-      return await readFile(join(this.dir, rel));
+      const abs = join(this.dir, rel);
+      const bytes = await readFile(abs);
+      await chmod(abs, 0o600).catch(() => undefined);
+      // Older scrollback files predate the write-side scrub.
+      return Buffer.from(scrubText(bytes.toString('latin1')), 'latin1');
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
         this.logger.warn('scrollback.read_failed', { rel, err });
