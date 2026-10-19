@@ -338,8 +338,9 @@ export const opencodeAdapter: CliAdapter = {
       // to the current Flash revision, so no dated model id is pinned. Other
       // providers keep the generic binding behavior.
       const isDeepSeek = !ai
-        || ai.baseUrl?.toLowerCase().includes('deepseek')
-        || (ai.model ?? '').toLowerCase().includes('deepseek');
+        || (ai.baseUrl
+          ? ai.baseUrl.toLowerCase().includes('deepseek')
+          : (ai.model ?? '').toLowerCase().includes('deepseek'));
       const lockedModel = isDeepSeek
         ? (ai && (ai.apiKey || ai.baseUrl)
             ? `${OPENCODE_SESSION_PROVIDER_NAME}/${OPENCODE_TRADE_MODEL_ID}`

@@ -91,6 +91,42 @@ describe('opencode runtime flags', () => {
     });
   });
 
+  it('keeps a non-DeepSeek workspace endpoint on its own model and effort', () => {
+    // A DeepSeek model id behind a different endpoint (for example OpenRouter)
+    // must not be rewritten to the DeepSeek preset's `deepseek-flash` alias.
+    const projected = opencodeAdapter.sessionRuntime!.project(
+      { cwd: '/workspace', env: {} },
+      {
+        binding: {
+          version: 1,
+          credential: { source: 'vault', credentialSlug: 'openrouter-1' },
+          model: 'deepseek/deepseek-v4.1-flash',
+          reasoningEffort: 'high',
+        },
+        ai: {
+          apiKey: 'test-key',
+          baseUrl: 'https://openrouter.ai/api/v1',
+          model: 'deepseek/deepseek-v4.1-flash',
+          reasoningEffort: 'high',
+          wireShape: 'openai-chat',
+        },
+      },
+    );
+
+    expect(projected.interactiveArgs).toEqual([
+      '--model', 'openalice-session/deepseek/deepseek-v4.1-flash',
+    ]);
+    expect(projected.headlessArgs).toEqual([
+      '--model', 'openalice-session/deepseek/deepseek-v4.1-flash',
+      '--variant', 'high',
+      '--agent', 'trade',
+    ]);
+    const config = JSON.parse(projected.env['OPENCODE_CONFIG_CONTENT']!);
+    expect(config.model).toBe('openalice-session/deepseek/deepseek-v4.1-flash');
+    expect(config.provider['openalice-session'].models['deepseek/deepseek-v4.1-flash'])
+      .toMatchObject({ options: { reasoningEffort: 'high' } });
+  });
+
   it('keeps run-only --variant off the interactive and web launch surfaces', () => {
     const projected = opencodeAdapter.sessionRuntime!.project(
       { cwd: '/workspace', env: {} },

@@ -101,7 +101,11 @@ export interface AgentLaunchSelectorsProps {
   readonly disabled?: boolean
   /** One provider/model/effort trigger for shared chat composers. */
   readonly combinedAi?: boolean
-  /** Hide the model/effort editors; the standalone access menu remains. */
+  /**
+   * Hide the model/effort editors. The standalone access menu remains on
+   * non-combined surfaces; on a `combinedAi` surface the combined trigger is
+   * the only access entry point, so do not combine it with `showInference`.
+   */
   readonly showInference?: boolean
   /** Present AI controls as full-width setting rows instead of composer chips. */
   readonly layout?: 'inline' | 'settings'

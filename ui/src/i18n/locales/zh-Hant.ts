@@ -1755,7 +1755,7 @@ export const zhHant: Resources = {
     noResearchMatches: '沒有符合目前篩選條件的研究工作階段。',
     workspacePickerDescription: '選擇下一項任務使用的長期研究工作台。',
     workspaceSessionCount: '{{count}} 個研究工作階段',
-    workspaceSettings: 'AutoQuant 工作區',
+    workspaceSettings: 'Quant 工作區',
     workspaceContextLabel: '量化工作區：{{name}}',
     workspaceContextMenu: '量化工作區選項',
     configureWorkspace: '設定目前工作區',
@@ -2453,7 +2453,7 @@ export const zhHant: Resources = {
     moreAgents: '另外 {{count}} 名 Agent',
     harness: {
       chat: 'Chat',
-      'auto-quant': 'AutoQuant',
+      'auto-quant': 'Quant',
       prediction: '預測',
       other: '其他',
     },

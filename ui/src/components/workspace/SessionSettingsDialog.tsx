@@ -91,6 +91,7 @@ export function SessionSettingsDialog({
   }, [initialDisplayName, open])
 
   const runtimeName = config.selectedAgent?.displayName ?? record.agent
+  const opencodeTrade = record.agent === 'opencode'
   const coworkerLabel = sessionCoworkerLabel(record)
 
   const nextDisplayName = normalizeDisplayName(displayName)
@@ -154,7 +155,7 @@ export function SessionSettingsDialog({
           {supportsAi && (
             <div className="flex min-w-0 flex-col gap-2">
               <div className="text-xs font-medium text-muted-foreground">
-                {t(record.agent === 'opencode'
+                {t(opencodeTrade
                   ? 'workspace.sessionSettings.aiAccessSection'
                   : 'workspace.sessionSettings.aiSection', { runtime: runtimeName })}
               </div>
@@ -166,7 +167,7 @@ export function SessionSettingsDialog({
                     openOrFocus({ kind: 'settings', params: { category: 'ai-provider' } })
                   }}
                   showRuntime={false}
-                  showInference={record.agent !== 'opencode'}
+                  showInference={!opencodeTrade}
                   menuPlacement="down"
                   toolbar
                   layout="settings"
