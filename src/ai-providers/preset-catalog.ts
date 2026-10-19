@@ -496,7 +496,7 @@ export const DEEPSEEK: PresetDef = {
   description: 'DeepSeek models via Claude Agent SDK (Anthropic-compatible)',
   category: 'third-party',
   defaultName: 'DeepSeek',
-  hint: 'Get your API key at platform.deepseek.com. Single platform — no regional split. The current Flash model is DeepSeek V4.1 Flash, exposed as `deepseek-flash`. Check the platform for current pricing.',
+  hint: 'Get your API key at platform.deepseek.com. Single platform — no regional split. The `deepseek-flash` alias follows the latest Flash revision; check the platform for current pricing.',
   zodSchema: z.object({
     backend: z.literal('agent-sdk'),
     loginMethod: z.literal('api-key'),
@@ -511,7 +511,7 @@ export const DEEPSEEK: PresetDef = {
   ],
   models: withModelSemantics('deepseek', [
     { id: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro (flagship)' },
-    { id: 'deepseek-flash', label: 'DeepSeek V4.1 Flash (fast / economical)' },
+    { id: 'deepseek-flash', label: 'DeepSeek Flash (latest, fast / economical)' },
   ]),
   setup: {
     apiKeyLabel: 'DeepSeek API key',

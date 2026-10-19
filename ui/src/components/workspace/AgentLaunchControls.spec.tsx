@@ -141,6 +141,19 @@ describe('AgentLaunchSelectors keyboard menus', () => {
     expect(group.className).toContain('sm:shrink-0')
   })
 
+  it('can hide the model and effort editors while keeping the access menu', () => {
+    render(
+      <AgentLaunchSelectors
+        config={launchConfig()}
+        onConfigureProvider={vi.fn()}
+        showInference={false}
+      />,
+    )
+
+    expect(screen.queryByTestId('agent-launch-inference-group')).toBeNull()
+    expect(screen.getByRole('button', { name: i18n.t('chatLanding.selectCredential') })).toBeTruthy()
+  })
+
   it('moves through the agent menu and returns focus on Escape', async () => {
     const user = userEvent.setup()
     render(<AgentLaunchSelectors config={launchConfig()} onConfigureProvider={vi.fn()} />)

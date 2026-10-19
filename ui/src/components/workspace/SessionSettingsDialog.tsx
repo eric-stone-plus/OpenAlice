@@ -154,7 +154,9 @@ export function SessionSettingsDialog({
           {supportsAi && (
             <div className="flex min-w-0 flex-col gap-2">
               <div className="text-xs font-medium text-muted-foreground">
-                {t('workspace.sessionSettings.aiSection', { runtime: runtimeName })}
+                {t(record.agent === 'opencode'
+                  ? 'workspace.sessionSettings.aiAccessSection'
+                  : 'workspace.sessionSettings.aiSection', { runtime: runtimeName })}
               </div>
               <fieldset disabled={!aiEditable || saving} className="min-w-0 disabled:opacity-60">
                 <AgentLaunchSelectors
@@ -164,6 +166,7 @@ export function SessionSettingsDialog({
                     openOrFocus({ kind: 'settings', params: { category: 'ai-provider' } })
                   }}
                   showRuntime={false}
+                  showInference={record.agent !== 'opencode'}
                   menuPlacement="down"
                   toolbar
                   layout="settings"

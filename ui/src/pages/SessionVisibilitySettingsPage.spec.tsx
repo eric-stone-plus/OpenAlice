@@ -46,8 +46,8 @@ describe('Session visibility settings', () => {
     expect(toggle.getAttribute('aria-checked')).toBe('false')
     expect(screen.getByText('Session visibility')).toBeTruthy()
     expect(screen.queryByText('Ask Alice')).toBeNull()
-    expect(screen.queryByText('Auto Quant')).toBeNull()
-    expect(screen.queryByText('Auto Prediction')).toBeNull()
+    expect(screen.queryByText('Quant')).toBeNull()
+    expect(screen.queryByText('Prediction')).toBeNull()
 
     fireEvent.click(toggle)
     await waitFor(() => expect(mocks.save).toHaveBeenCalledWith({

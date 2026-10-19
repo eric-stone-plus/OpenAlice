@@ -25,6 +25,72 @@ describe('opencode runtime flags', () => {
     expect(OPENCODE_TRADE_AGENT.variant).toBe('max');
   });
 
+  it('locks the native DeepSeek path to the stable alias and max effort', () => {
+    const projected = opencodeAdapter.sessionRuntime!.project(
+      { cwd: '/workspace', env: {} },
+      {
+        binding: {
+          version: 1,
+          credential: { source: 'native' },
+          // A stale session binding must not pin a dated model or lower effort.
+          model: 'deepseek/deepseek-v4.1-flash',
+          reasoningEffort: 'high',
+        },
+        ai: null,
+      },
+    );
+
+    expect(projected.interactiveArgs).toEqual(['--model', 'deepseek/deepseek-flash']);
+    expect(projected.headlessArgs).toEqual([
+      '--model', 'deepseek/deepseek-flash',
+      '--variant', 'max',
+      '--agent', 'trade',
+    ]);
+    expect(JSON.parse(projected.env['OPENCODE_CONFIG_CONTENT']!)).toEqual({
+      default_agent: 'trade',
+      agent: { trade: OPENCODE_TRADE_AGENT },
+      model: 'deepseek/deepseek-flash',
+    });
+  });
+
+  it('locks a workspace DeepSeek provider to the stable alias and max effort', () => {
+    const projected = opencodeAdapter.sessionRuntime!.project(
+      { cwd: '/workspace', env: {} },
+      {
+        binding: {
+          version: 1,
+          credential: { source: 'vault', credentialSlug: 'deepseek-1' },
+          model: 'deepseek-v4-pro',
+          reasoningEffort: 'high',
+        },
+        ai: {
+          apiKey: 'test-key',
+          baseUrl: 'https://api.deepseek.com',
+          model: 'deepseek-v4-pro',
+          reasoningEffort: 'high',
+          wireShape: 'openai-chat',
+        },
+      },
+    );
+
+    expect(projected.interactiveArgs).toEqual(['--model', 'openalice-session/deepseek-flash']);
+    expect(projected.headlessArgs).toEqual([
+      '--model', 'openalice-session/deepseek-flash',
+      '--variant', 'max',
+      '--agent', 'trade',
+    ]);
+    const config = JSON.parse(projected.env['OPENCODE_CONFIG_CONTENT']!);
+    expect(config.agent.trade).toMatchObject({
+      model: 'openalice-session/deepseek-flash',
+      variant: 'max',
+    });
+    expect(config.model).toBe('openalice-session/deepseek-flash');
+    expect(config.provider['openalice-session'].models['deepseek-flash']).toMatchObject({
+      options: { reasoningEffort: 'max' },
+      limit: { context: 1_000_000 },
+    });
+  });
+
   it('keeps run-only --variant off the interactive and web launch surfaces', () => {
     const projected = opencodeAdapter.sessionRuntime!.project(
       { cwd: '/workspace', env: {} },
@@ -76,16 +142,18 @@ it('projects the app overlay without rewriting the process config', () => {
   expect(opencodeAdapter.composeWebCommand!([], { cwd: '/workspace', env: projected.env, sessionRuntime: projected })).toEqual(['opencode', 'acp']);
 });
 
-it('does not inject a top-level permission override without a model override', () => {
+it('does not inject a top-level permission override', () => {
   const projected = opencodeAdapter.sessionRuntime!.project(
     { cwd: '/workspace', env: { OPENCODE_CONFIG_CONTENT: '{"theme":"system","permission":"ask"}' } },
     { binding: { version: 1, credential: { source: 'native' } }, ai: null },
   );
-  // The overlay adds the Trade profile; permissions stay scoped to that agent.
+  // The overlay adds the Trade profile and its locked model; permissions stay
+  // scoped to that agent.
   const config = JSON.parse(projected.env['OPENCODE_CONFIG_CONTENT']!);
   expect(config).toEqual({
     default_agent: 'trade',
     agent: { trade: OPENCODE_TRADE_AGENT },
+    model: 'deepseek/deepseek-flash',
   });
   expect(config.permission).toBeUndefined();
 });

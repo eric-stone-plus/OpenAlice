@@ -19,7 +19,13 @@ import {
 import { readWorkspaceFile, writeWorkspaceFile } from '../file-service.js';
 import type { HeadlessOutputEvent } from '../headless-output.js';
 import { resetOwnedJsonConfig, writeOwnedJsonConfig } from './owned-json-config.js';
-import { OPENCODE_TRADE_AGENT, OPENCODE_TRADE_AGENT_ID } from './opencode-trade-agent.js';
+import {
+  OPENCODE_TRADE_AGENT,
+  OPENCODE_TRADE_AGENT_ID,
+  OPENCODE_TRADE_MODEL,
+  OPENCODE_TRADE_MODEL_ID,
+  OPENCODE_TRADE_VARIANT,
+} from './opencode-trade-agent.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -326,16 +332,37 @@ export const opencodeAdapter: CliAdapter = {
     project(_ctx, runtime: ResolvedSessionRuntimeBinding) {
       const ai = runtime.ai;
       const model = runtime.binding.model;
-      const selectedModel = ai && (ai.apiKey || ai.baseUrl) && model
-        ? `${OPENCODE_SESSION_PROVIDER_NAME}/${model}`
-        : model;
+      // DeepSeek is the app's default Trade provider. Lock it to the stable
+      // `deepseek-flash` alias at the highest effort, ignoring a stale session
+      // binding or an advanced-settings override. The backend maps the alias
+      // to the current Flash revision, so no dated model id is pinned. Other
+      // providers keep the generic binding behavior.
+      const isDeepSeek = !ai
+        || ai.baseUrl?.toLowerCase().includes('deepseek')
+        || (ai.model ?? '').toLowerCase().includes('deepseek');
+      const lockedModel = isDeepSeek
+        ? (ai && (ai.apiKey || ai.baseUrl)
+            ? `${OPENCODE_SESSION_PROVIDER_NAME}/${OPENCODE_TRADE_MODEL_ID}`
+            : OPENCODE_TRADE_MODEL)
+        : null;
+      const selectedModel = lockedModel ?? (
+        ai && (ai.apiKey || ai.baseUrl) && model
+          ? `${OPENCODE_SESSION_PROVIDER_NAME}/${model}`
+          : model
+      );
+      const reasoningEffort = lockedModel
+        ? OPENCODE_TRADE_VARIANT
+        : runtime.binding.reasoningEffort;
+      const tradeAgent = lockedModel
+        ? { ...OPENCODE_TRADE_AGENT, model: lockedModel, variant: OPENCODE_TRADE_VARIANT }
+        : OPENCODE_TRADE_AGENT;
       const interactiveArgs = [
         ...(selectedModel ? ['--model', selectedModel] : []),
       ];
       const headlessArgs = [
         ...interactiveArgs,
-        ...(runtime.binding.reasoningEffort
-          ? ['--variant', runtime.binding.reasoningEffort]
+        ...(reasoningEffort
+          ? ['--variant', reasoningEffort]
           : []),
         // Scheduled/issue runs are OpenAlice work: select the same app-owned
         // Trade profile the GUI defaults to. The profile tells headless runs
@@ -356,12 +383,25 @@ export const opencodeAdapter: CliAdapter = {
         // default. Web and headless select Trade explicitly.
         default_agent: OPENCODE_TRADE_AGENT_ID,
         agent: {
-          [OPENCODE_TRADE_AGENT_ID]: OPENCODE_TRADE_AGENT,
+          [OPENCODE_TRADE_AGENT_ID]: tradeAgent,
         },
       };
       if (ai && (ai.apiKey || ai.baseUrl)) {
+        // Keep the workspace provider and wire shape, but expose the stable
+        // Flash alias with the locked max effort. This keeps the agent model
+        // and the session model identical, which is what lets opencode apply
+        // the variant.
+        const providerCred: WorkspaceAiCred = lockedModel
+          ? {
+              ...ai,
+              model: OPENCODE_TRADE_MODEL_ID,
+              reasoning: true,
+              reasoningEffort: OPENCODE_TRADE_VARIANT,
+              contextWindow: 1_000_000,
+            }
+          : ai;
         overlay['provider'] = {
-          [OPENCODE_SESSION_PROVIDER_NAME]: openCodeProvider(ai, 'OpenAlice Session provider'),
+          [OPENCODE_SESSION_PROVIDER_NAME]: openCodeProvider(providerCred, 'OpenAlice Session provider'),
         };
       }
       // ACP has no --model flag. Its native config selects the default model

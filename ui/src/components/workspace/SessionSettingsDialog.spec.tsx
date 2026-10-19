@@ -54,8 +54,17 @@ vi.mock('../../hooks/usePinnedRuntimeDraft', async (importOriginal) => ({
 }))
 
 vi.mock('./AgentLaunchControls', () => ({
-  AgentLaunchSelectors: ({ onConfigureProvider }: { onConfigureProvider: () => void }) => (
-    <div>AI selectors<button onClick={onConfigureProvider}>Add API account</button></div>
+  AgentLaunchSelectors: ({
+    onConfigureProvider,
+    showInference = true,
+  }: {
+    onConfigureProvider: () => void
+    showInference?: boolean
+  }) => (
+    <div>
+      {showInference ? 'AI selectors' : 'AI access only'}
+      <button onClick={onConfigureProvider}>Add API account</button>
+    </div>
   ),
 }))
 
@@ -110,6 +119,13 @@ describe('SessionSettingsDialog', () => {
     expect(onOpenChange).toHaveBeenCalledWith(false)
     expect(openAccounts).toHaveBeenCalledWith({ kind: 'settings', params: { category: 'ai-provider' } })
     expect(onSaveRuntime).not.toHaveBeenCalled()
+  })
+
+  it('hides the model and effort editors for an opencode Trade session', () => {
+    render(<SessionSettingsDialog open onOpenChange={vi.fn()} record={record({ agent: 'opencode' })} agents={[]}
+      workspaceId="workspace-1" onSaveDisplayName={vi.fn()} onSaveRuntime={vi.fn()} />)
+    expect(screen.queryByText('AI selectors')).toBeNull()
+    expect(screen.getByText('AI access only')).toBeTruthy()
   })
 
   it('saves the selected credential, model, and effort without resuming', async () => {

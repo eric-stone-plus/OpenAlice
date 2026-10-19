@@ -10,16 +10,24 @@
  */
 export const OPENCODE_TRADE_AGENT_ID = 'trade'
 
+// `deepseek-flash` is DeepSeek's stable alias: the backend maps it to the
+// current Flash revision, so the app does not pin a dated model id. Keep the
+// alias and the max effort here as the single source of truth for the Trade
+// profile; the adapter projects them into every launch surface.
+export const OPENCODE_TRADE_MODEL = 'deepseek/deepseek-flash'
+export const OPENCODE_TRADE_MODEL_ID = 'deepseek-flash'
+export const OPENCODE_TRADE_VARIANT = 'max'
+
 export const OPENCODE_TRADE_AGENT = {
   mode: 'primary',
   description: 'Trade mode. OpenAlice trading desk: evidence-first research, risk managed execution, explicit approval before orders.',
   color: '#98c379',
-  // The app pins deepseek-flash at max effort. opencode resolves an agent
-  // variant only when the agent names a model (`_c(e.model, e.variant)`), so
-  // pin both here; a session-level model override drops the variant instead
-  // of sending max to a model that does not support it.
-  model: 'deepseek/deepseek-flash',
-  variant: 'max',
+  // opencode resolves an agent variant only when the agent names a model
+  // (`_c(e.model, e.variant)`), so pin both here; a session-level model
+  // override drops the variant instead of sending max to a model that does
+  // not support it.
+  model: OPENCODE_TRADE_MODEL,
+  variant: OPENCODE_TRADE_VARIANT,
   permission: {
     // Mirror the seat's auto/goal policy: tools run without ACP approval
     // prompts, while order writes stay behind the app's trading-mode gate

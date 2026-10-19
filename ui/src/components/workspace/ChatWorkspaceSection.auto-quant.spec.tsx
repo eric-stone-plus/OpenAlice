@@ -139,7 +139,7 @@ describe('Ask Alice sidebar in AutoQuant mode', () => {
     render(<WorkspacesContext.Provider value={state}><ChatWorkspaceSection mode="auto-quant" placement="navigation" /></WorkspacesContext.Provider>)
     expect(screen.queryByRole('button', { name: 'Studio' })).toBeNull()
     expect(screen.queryByRole('button', { name: sessionTitle })).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: 'Auto Quant Harness' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Quant Harness' }))
     expect(actions.openOrFocus).toHaveBeenCalledWith({ kind: 'auto-quant-landing', params: {} })
     expect(actions.setAutoQuantDefaultWorkspace).not.toHaveBeenCalled()
   })
@@ -193,7 +193,7 @@ describe('Ask Alice sidebar in AutoQuant mode', () => {
 })
 
 describe.each(['auto-quant', 'prediction'] as const)('%s navigation readiness', (mode) => {
-  const name = mode === 'auto-quant' ? 'Auto Quant' : 'Auto Prediction'
+  const name = mode === 'auto-quant' ? 'Quant' : 'Prediction'
   const templateName = mode === 'auto-quant' ? 'auto-quant-v2' : 'auto-prediction'
   const landingKind = mode === 'auto-quant' ? 'auto-quant-landing' : 'auto-prediction-landing'
   function renderNavigation(overrides: Partial<WorkspacesContextValue> = {}, compact = false) {

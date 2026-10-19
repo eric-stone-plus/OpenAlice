@@ -101,6 +101,8 @@ export interface AgentLaunchSelectorsProps {
   readonly disabled?: boolean
   /** One provider/model/effort trigger for shared chat composers. */
   readonly combinedAi?: boolean
+  /** Hide the model/effort editors; the standalone access menu remains. */
+  readonly showInference?: boolean
   /** Present AI controls as full-width setting rows instead of composer chips. */
   readonly layout?: 'inline' | 'settings'
   /** Raise menus above a parent settings dialog. */
@@ -525,6 +527,7 @@ export const AgentLaunchSelectors = forwardRef<AgentLaunchSelectorsHandle, Agent
     toolbar = false,
     layout = 'inline',
     combinedAi = false,
+    showInference = true,
     disabled = false,
     menuPositionerClassName,
   },
@@ -647,7 +650,7 @@ export const AgentLaunchSelectors = forwardRef<AgentLaunchSelectorsHandle, Agent
         </DropdownMenu>
       )}
 
-      {showAi && config.selectedAgent && (
+      {showAi && showInference && config.selectedAgent && (
         <div
           data-testid="agent-launch-inference-group"
           className={settingsLayout ? 'w-full min-w-0' : `contents sm:flex sm:shrink-0 sm:items-center ${toolbar ? 'sm:gap-1' : 'sm:gap-2'}`}
