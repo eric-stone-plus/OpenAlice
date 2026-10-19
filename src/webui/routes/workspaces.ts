@@ -3362,8 +3362,18 @@ export function createWorkspaceRoutes(
     if (!meta) return c.json({ error: 'not_found' }, 404);
 
     const body = (await safeJson(c)) as WorkspaceAiCred | null;
-    const cfg = body && typeof body === 'object' ? body : {};
+    const incoming = body && typeof body === 'object' ? body : {};
     try {
+      // The GET bundle redacts apiKey. Keep the existing Workspace key when
+      // the caller omits it (the empty-key convention), so editing metadata
+      // never silently destroys a working credential.
+      const existing = adapter.readAiConfig ? await adapter.readAiConfig(meta.dir) : null;
+      const incomingKey = typeof incoming.apiKey === 'string' ? incoming.apiKey.trim() : '';
+      const cfg: WorkspaceAiCred = {
+        ...(existing ?? {}),
+        ...incoming,
+        apiKey: incomingKey || existing?.apiKey || null,
+      };
       const credentials = cfg.apiKey ? await readCredentials() : {};
       const slug = matchCredentialByApiKey(credentials, cfg.apiKey);
       const vendor = slug

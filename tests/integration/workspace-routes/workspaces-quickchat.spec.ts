@@ -8,7 +8,7 @@ import { installExecutionFixture } from '../../../src/webui/routes/workspace-exe
  * touching the real ai-provider-manager.json.
  */
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -551,6 +551,36 @@ describe('GET /credentials — Quick Chat launch metadata', () => {
     expect(response.status).toBe(409);
     expect(await response.json()).toMatchObject({ error: 'native_only' });
     expect(opencode.writeAiConfig).not.toHaveBeenCalled();
+  });
+
+  it('keeps an existing Workspace key when the redacted bundle sends apiKey null', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'agent-config-keep-key-'));
+    try {
+      vi.mocked(readCredentials).mockResolvedValue({});
+      const { app } = build({
+        workspaces: [{
+          id: 'ws-1',
+          dir,
+          template: 'chat',
+          tag: 'chat-x',
+          createdAt: '2026-07-01T00:00:00.000Z',
+        }],
+        claudeConfig: { apiKey: 'sk-existing', model: 'claude-old', wireShape: 'anthropic' },
+      });
+
+      const response = await app.request('/ws-1/agent-config/claude', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ apiKey: null, model: 'claude-new' }),
+      });
+
+      expect(response.status).toBe(200);
+      const written = JSON.parse(await readFile(join(dir, '.claude/settings.local.json'), 'utf8'));
+      expect(written.env?.ANTHROPIC_API_KEY).toBe('sk-existing');
+      expect(written.model).toBe('claude-new');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });
 
