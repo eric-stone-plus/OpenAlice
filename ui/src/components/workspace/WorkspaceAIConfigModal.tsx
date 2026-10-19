@@ -304,7 +304,9 @@ export function WorkspaceAIConfigModal({
   } = useWorkspaces()
   const workspace = workspaces.find((w) => w.id === wsId) ?? null
   const workspaceLabel = workspace?.displayName?.trim() || workspace?.tag || wsId
-  const [section, setSection] = useState<Section>(initialSection)
+  const initialAgentNativeOnly = agents.find((agent) => agent.id === initialAgent)?.capabilities.aiProvider?.nativeOnly === true
+  const resolvedInitialSection = initialSection === 'ai' && initialAgentNativeOnly ? 'general' : initialSection
+  const [section, setSection] = useState<Section>(resolvedInitialSection)
   const [tab, setTab] = useState<Tab>(initialAgent)
   const [metadataFormWsId, setMetadataFormWsId] = useState<string | null>(null)
   const [displayName, setDisplayName] = useState('')
@@ -391,11 +393,11 @@ export function WorkspaceAIConfigModal({
   }, [])
 
   useEffect(() => {
-    setSection(initialSection)
+    setSection(resolvedInitialSection)
     setTab(initialAgent)
     setPickedCredential('')
     setPickedWireShape('')
-  }, [initialAgent, initialSection, wsId])
+  }, [initialAgent, initialSection, resolvedInitialSection, wsId])
 
   useEffect(() => {
     if (metadataFormWsId === wsId) return
@@ -423,6 +425,7 @@ export function WorkspaceAIConfigModal({
   const form = { claude: claudeForm, codex: codexForm, opencode: opencodeForm, pi: piForm }[tab]
   const setForm = { claude: setClaudeForm, codex: setCodexForm, opencode: setOpencodeForm, pi: setPiForm }[tab]
   const tabProviderCapabilities = providerCapabilities(agents, tab)
+  const tabNativeOnly = tabProviderCapabilities?.nativeOnly === true
   const modelRegistration = tabProviderCapabilities?.modelRegistration
   const formCredentialByKey = useMemo(() => credentials.find((credential) => (
     !!credential.apiKey && credential.apiKey === form.apiKey.trim()
@@ -503,7 +506,8 @@ export function WorkspaceAIConfigModal({
     )
   }, [bundle, form, modelRegistration, tab, tabProviderCapabilities])
   const enteredApiKey = form.apiKey.trim()
-  const offerSaveCred = !!enteredApiKey &&
+  const offerSaveCred = !tabNativeOnly &&
+    !!enteredApiKey &&
     !credentials.some((credential) => credential.apiKey === enteredApiKey) &&
     dismissedCredentialKey !== enteredApiKey
   const connectionDirty = useMemo(
@@ -516,6 +520,7 @@ export function WorkspaceAIConfigModal({
   const needsTest = dirty && connectionDirty && !testPassedForCurrent
 
   const applyCredential = () => {
+    if (tabNativeOnly) return
     const cred = credentials.find((x) => x.slug === pickedCredential)
     if (!cred) return
     // Pick the wire this tab's agent speaks from the credential's capabilities.
@@ -563,6 +568,7 @@ export function WorkspaceAIConfigModal({
   }
 
   const handleSaveCredential = async () => {
+    if (tabNativeOnly) return
     setSavingCred(true)
     setError(null)
     try {
@@ -867,8 +873,15 @@ export function WorkspaceAIConfigModal({
             </div>
           </div>
         </div>
+        {tabNativeOnly && (
+          <div className="border-b border-border px-4 py-4">
+            <div className="text-[13px] font-semibold text-foreground">{t('aiProvider.nativeTitle')}</div>
+            <div className="mt-1 font-mono text-[12px] text-muted-foreground">deepseek/deepseek-flash · max</div>
+            <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">{t('aiProvider.nativeHelp')}</p>
+          </div>
+        )}
         {/* Tabs */}
-        <div className="flex shrink-0 overflow-x-auto overscroll-x-contain border-b border-border bg-secondary/50 [scrollbar-width:none]">
+        <div className={`flex shrink-0 overflow-x-auto overscroll-x-contain border-b border-border bg-secondary/50 [scrollbar-width:none]${tabNativeOnly ? ' hidden' : ''}`}>
           {(['claude', 'codex', 'opencode', 'pi'] as const).map((id) => (
             <button
               key={id}
@@ -894,7 +907,7 @@ export function WorkspaceAIConfigModal({
         {/* Body */}
         <div
           data-testid="workspace-settings-ai-scroll"
-          className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain p-4 [scrollbar-gutter:stable]"
+          className={`min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain p-4 [scrollbar-gutter:stable]${tabNativeOnly ? ' hidden' : ''}`}
         >
           {/* Quick pick — load a saved credential into the form */}
           {credentials.length === 0 ? (
@@ -1332,7 +1345,7 @@ export function WorkspaceAIConfigModal({
         {/* Footer */}
         <div
           data-testid="workspace-settings-ai-footer"
-          className="flex shrink-0 items-center justify-between gap-2 border-t border-border bg-secondary/30 px-3 py-2.5"
+          className={`flex shrink-0 items-center justify-between gap-2 border-t border-border bg-secondary/30 px-3 py-2.5${tabNativeOnly ? ' hidden' : ''}`}
         >
           <div className="flex gap-2">
             <Button
@@ -1386,7 +1399,6 @@ export function WorkspaceAIConfigModal({
                 wsId={wsId}
                 agents={agents.map((agent) => agent.id)}
                 initialAgent={initialAgent}
-                onOpenCompatibilityConfig={() => setSection('ai')}
               />
             )}
 

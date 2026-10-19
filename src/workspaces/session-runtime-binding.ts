@@ -55,7 +55,10 @@ export function createNativeSessionRuntimeBinding(input: {
   readonly selection?: Omit<SessionRuntimeSelection, 'credentialSlug' | 'credentialSource'>
 }): ResolvedSessionRuntimeBinding {
   assertedAgentContract(input.adapter)
-  const selection = input.selection ?? {}
+  // Native-only runtimes (opencode) own provider selection through their own
+  // config/auth store. Ignore any model/effort projection as well: the adapter
+  // pins the app's Trade profile and the stable DeepSeek alias.
+  const selection = isNativeOnly(input.adapter) ? {} : input.selection ?? {}
   const binding: SessionRuntimeBinding = {
     version: 1,
     credential: { source: 'native' },
@@ -110,6 +113,11 @@ function assertedAgentContract(adapter: CliAdapter): void {
       `Agent runtime "${adapter.id}" does not implement Session runtime projection`,
     )
   }
+}
+
+/** The adapter owns provider selection; no vault/workspace binding may enter. */
+function isNativeOnly(adapter: CliAdapter): boolean {
+  return adapter.capabilities.aiProvider?.nativeOnly === true
 }
 
 function modelFields(
@@ -185,6 +193,9 @@ export async function createSessionRuntimeBinding(input: {
   readonly credentials?: Readonly<Record<string, Credential>>
 }): Promise<ResolvedSessionRuntimeBinding> {
   assertedAgentContract(input.adapter)
+  if (isNativeOnly(input.adapter)) {
+    return createNativeSessionRuntimeBinding({ adapter: input.adapter })
+  }
   const selection = input.selection ?? {}
   if (selection.credentialSource === 'native') {
     if (selection.credentialSlug) {
@@ -219,6 +230,12 @@ export async function resolveSessionRuntimeBinding(input: {
   readonly credentials?: Readonly<Record<string, Credential>>
 }): Promise<ResolvedSessionRuntimeBinding> {
   assertedAgentContract(input.adapter)
+  if (isNativeOnly(input.adapter)) {
+    // Preserve the persisted binding byte-for-byte so resume identity checks
+    // (ResumeRegistry.ensure) keep passing; the adapter ignores its
+    // credential/model projection and launches the native Trade profile.
+    return { binding: input.binding, ai: null }
+  }
   const credential = input.binding.credential
   if (credential.source === 'vault') {
     const resolved = resolveVault(

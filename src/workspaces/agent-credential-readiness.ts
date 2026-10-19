@@ -120,6 +120,22 @@ export async function getAgentCredentialReadiness(opts: {
       message: `unknown agent runtime: ${agentId}`,
     }
   }
+  if (adapter.capabilities.aiProvider?.nativeOnly) {
+    // The runtime owns provider/auth selection. Never inspect the vault or a
+    // Workspace provider file: doing so would reintroduce a second provider
+    // route and could fail readiness on credentials the runtime ignores.
+    return {
+      agent: agentId,
+      ready: true,
+      requiresCredential: false,
+      source: 'runtime-login',
+      hasWorkspaceConfig: false,
+      hasUsableWorkspaceConfig: false,
+      detectedCredentialSlug: null,
+      compatibleCredentialSlugs: [],
+      injectableCredentialSlugs: [],
+    }
+  }
   if (!requiresWorkspaceCredential(adapter)) {
     const cfg = await readWorkspaceConfig(meta, adapter)
     // Native runtime readiness must not become dependent on OpenAlice's vault.
@@ -209,6 +225,11 @@ export async function ensureAgentCredentialReady(opts: {
   readonly logger?: Logger
 }): Promise<AgentCredentialReadiness> {
   const { meta, agentId, adapter, pickedCredentialSlug, logger } = opts
+  if (adapter?.capabilities.aiProvider?.nativeOnly) {
+    // Native-only runtimes ignore picked vault credentials. Return the native
+    // readiness instead of mutating a Workspace provider file.
+    return getAgentCredentialReadiness({ meta, agentId, adapter })
+  }
   const required = requiresWorkspaceCredential(adapter)
   if (!required && !pickedCredentialSlug) {
     return getAgentCredentialReadiness({ meta, agentId, adapter })

@@ -164,7 +164,9 @@ export function resolveWorkspaceRuntimeSelection(
   mode: WorkspaceRuntimeMode,
   agent: string,
   explicit: SessionRuntimeSelection | undefined,
+  nativeOnly = false,
 ): SessionRuntimeSelection | undefined {
+  if (nativeOnly) return { credentialSource: 'native' }
   const configured = settings?.runtime[mode].agents[agent]
   const preference = configured ?? settings?.runtime[mode].recent.agents[agent]
   const requested = explicit ?? {}

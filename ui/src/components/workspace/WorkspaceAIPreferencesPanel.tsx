@@ -58,15 +58,16 @@ type PreferenceSaveState =
   }
 
 function launchFromPreference(
-  agent: string,
+  agent: AgentInfo,
   preference: WorkspaceRuntimePreference | undefined,
 ): QuickChatLaunchPreference {
+  const nativeOnly = agent.capabilities.aiProvider?.nativeOnly === true
   return {
-    agent,
-    accessMode: preference?.accessMode ?? 'native',
-    credentialSlug: preference?.accessMode === 'vault' ? preference.credentialSlug ?? null : null,
-    model: preference?.model ?? null,
-    reasoningEffort: preference?.reasoningEffort ?? null,
+    agent: agent.id,
+    accessMode: nativeOnly ? 'native' : preference?.accessMode ?? 'native',
+    credentialSlug: !nativeOnly && preference?.accessMode === 'vault' ? preference.credentialSlug ?? null : null,
+    model: nativeOnly ? null : preference?.model ?? null,
+    reasoningEffort: nativeOnly ? null : preference?.reasoningEffort ?? null,
   }
 }
 
@@ -84,7 +85,9 @@ function preferenceSummary(
   preference: WorkspaceRuntimePreference | undefined,
   credentials: Readonly<Record<string, SavedCredential>>,
   nativeLabel: string,
+  nativeOnly = false,
 ): { access: string; inference: string; vendor?: string } {
+  if (nativeOnly) return { access: nativeLabel, inference: '—' }
   if (!preference) return { access: nativeLabel, inference: '—' }
   const credential = preference.accessMode === 'vault' && preference.credentialSlug
     ? credentials[preference.credentialSlug]
@@ -120,8 +123,8 @@ function RuntimePreferenceDialog({
   const [applying, setApplying] = useState(false)
   const [applyError, setApplyError] = useState<string | null>(null)
   const initial = useMemo(
-    () => launchFromPreference(agent.id, fixed ?? recent),
-    [agent.id, fixed, recent],
+    () => launchFromPreference(agent, fixed ?? recent),
+    [agent, fixed, recent],
   )
   const editor = usePinnedRuntimeDraft({
     workspaceId,
@@ -188,15 +191,22 @@ function RuntimePreferenceDialog({
 
         {useFixed && (
           <div className="space-y-3 rounded-lg border border-border bg-muted/20 p-3">
-            <AgentLaunchSelectors
-              config={editor.config}
-              onConfigureProvider={onConfigureProvider}
-              showRuntime={false}
-              toolbar
-              layout="settings"
-              menuPlacement="down"
-              menuPositionerClassName="z-[80]"
-            />
+            {agent.capabilities.aiProvider?.nativeOnly ? (
+              <div className="rounded-md border border-border bg-background px-3 py-2 text-[11px] leading-relaxed">
+                <div className="font-medium text-foreground">{t('aiProvider.nativeTitle')}</div>
+                <div className="mt-0.5 font-mono text-muted-foreground">{t('workspace.sessionSettings.nativeProviderDetail')}</div>
+              </div>
+            ) : (
+              <AgentLaunchSelectors
+                config={editor.config}
+                onConfigureProvider={onConfigureProvider}
+                showRuntime={false}
+                toolbar
+                layout="settings"
+                menuPlacement="down"
+                menuPositionerClassName="z-[80]"
+              />
+            )}
             <p className="text-[10.5px] leading-relaxed text-muted-foreground">
               {t('workspaceSettings.preferences.nativeAccessHelp')}
             </p>
@@ -311,9 +321,20 @@ export function WorkspaceAIPreferencesPanel({ workspace, agents, onSaved, onConf
     previous: WorkspaceRuntimeDrafts,
   ): Promise<string | null> => {
     if (savedTimerRef.current !== null) window.clearTimeout(savedTimerRef.current)
+    const sanitizeNativeOnly = (
+      value: WorkspaceRuntimeDrafts[WorkspaceRuntimeMode],
+    ): WorkspaceRuntimeDrafts[WorkspaceRuntimeMode] => {
+      const agents = { ...value.agents }
+      for (const agent of runtimeAgents) {
+        if (agent.capabilities.aiProvider?.nativeOnly) {
+          agents[agent.id] = { accessMode: 'native' }
+        }
+      }
+      return { ...value, agents }
+    }
     const normalized: WorkspaceRuntimeDrafts = {
-      interactive: normalizeMode('interactive', next.interactive),
-      headless: normalizeMode('headless', next.headless),
+      interactive: sanitizeNativeOnly(normalizeMode('interactive', next.interactive)),
+      headless: sanitizeNativeOnly(normalizeMode('headless', next.headless)),
     }
     setDrafts(normalized)
     setSaveState({ mode, status: 'saving' })
@@ -360,6 +381,7 @@ export function WorkspaceAIPreferencesPanel({ workspace, agents, onSaved, onConf
                 persistedRuntime[mode].recent.agents[recentAgentId],
                 credentials,
                 t('workspaceSettings.preferences.agentLogin'),
+                recentAgent?.capabilities.aiProvider?.nativeOnly === true,
               )
               : null
             const draftDefaultAgent = drafts[mode].defaultAgent
@@ -451,7 +473,12 @@ export function WorkspaceAIPreferencesPanel({ workspace, agents, onSaved, onConf
                     {compatibleAgents.map((agent) => {
                       const fixed = drafts[mode].agents[agent.id]
                       const recent = persistedRuntime[mode].recent.agents[agent.id]
-                      const summary = preferenceSummary(fixed ?? recent, credentials, t('workspaceSettings.preferences.agentLogin'))
+                      const summary = preferenceSummary(
+                        fixed ?? recent,
+                        credentials,
+                        t('workspaceSettings.preferences.agentLogin'),
+                        agent.capabilities.aiProvider?.nativeOnly === true,
+                      )
                       return (
                         <div key={agent.id} className="grid min-h-12 grid-cols-[minmax(7rem,1fr)_minmax(0,2fr)_2rem] items-center gap-3 border-b border-border/70 px-3 py-2 last:border-b-0">
                           <div className="flex min-w-0 items-start gap-2">

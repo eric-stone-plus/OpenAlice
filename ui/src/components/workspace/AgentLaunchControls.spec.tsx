@@ -81,6 +81,7 @@ function launchConfig(overrides: Partial<AgentLaunchConfigState> = {}): AgentLau
     runtimeReadiness: null,
     selectedRuntimeReadiness: null,
     needsCredential: true,
+    nativeOnly: false,
     canSelectCredential: true,
     accessMode: 'vault',
     credentials,

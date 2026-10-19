@@ -106,6 +106,13 @@ export interface AgentProviderCapabilities {
    * concrete Workspace provider binding before OpenAlice launches it.
    */
   readonly credentialSource: 'runtime-or-workspace' | 'workspace-required';
+  /**
+   * The runtime owns provider selection end-to-end (its own config/auth store).
+   * OpenAlice must not offer vault credentials or Workspace provider files for
+   * it: every Session resolves to native, and model/effort overrides are
+   * suppressed so the adapter's own projection stays authoritative.
+   */
+  readonly nativeOnly?: boolean;
   /** Wire protocols this runtime can consume, in native preference order. */
   readonly wirePreference: readonly WireShape[];
   /**

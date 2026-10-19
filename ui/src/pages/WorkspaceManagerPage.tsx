@@ -143,7 +143,7 @@ export function WorkspaceManagerPage({ spec, visible = true }: { spec: ManagerSp
 
   const adjustManagerAi = () => {
     if (isWorkspaceAiAgent(effectiveAgent)) {
-      openAgentConfig(MANAGER_WORKSPACE_ID, effectiveAgent, 'ai')
+      openAgentConfig(MANAGER_WORKSPACE_ID, effectiveAgent, 'launch')
       return
     }
     goConfigureProvider()

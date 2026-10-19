@@ -403,6 +403,8 @@ export interface AgentLaunchConfigState {
   readonly runtimeReadiness: AgentRuntimeReadinessSnapshot | null
   readonly selectedRuntimeReadiness: AgentRuntimeReadinessRow | null
   readonly needsCredential: boolean
+  /** The runtime owns provider selection; OpenAlice offers no credential/model UI. */
+  readonly nativeOnly: boolean
   /** The runtime can accept an explicit OpenAlice-managed Workspace override. */
   readonly canSelectCredential: boolean
   readonly accessMode: AgentLaunchAccessMode
@@ -495,7 +497,8 @@ export function useAgentLaunchConfig({
     selectedRuntimeReadiness.source === 'global-login'
   )
   const needsCredential = requiresWorkspaceCredential(selectedAgent)
-  const canSelectCredential = Boolean(selectedAgent?.capabilities.aiProvider)
+  const nativeOnly = selectedAgent?.capabilities.aiProvider?.nativeOnly === true
+  const canSelectCredential = Boolean(selectedAgent?.capabilities.aiProvider) && !nativeOnly
   const credentials = credentialList?.agent === effectiveAgent
     ? credentialList.credentials
     : null
@@ -522,7 +525,7 @@ export function useAgentLaunchConfig({
   useEffect(() => {
     let live = true
     const refreshCredentials = () => {
-      if (effectiveAgent === null) {
+      if (nativeOnly || effectiveAgent === null) {
         setCredentialList(null)
         return
       }
@@ -540,9 +543,10 @@ export function useAgentLaunchConfig({
       live = false
       window.removeEventListener('openalice:credentials-changed', refreshCredentials)
     }
-  }, [effectiveAgent])
+  }, [effectiveAgent, nativeOnly])
 
   useEffect(() => {
+    if (nativeOnly) return
     let live = true
     const refreshDefaults = () => {
       void configApi.getWorkspaceCredentialDefaults()
@@ -558,7 +562,7 @@ export function useAgentLaunchConfig({
       live = false
       window.removeEventListener(WORKSPACE_DEFAULTS_CHANGED_EVENT, refreshDefaults)
     }
-  }, [])
+  }, [nativeOnly])
 
   useEffect(() => {
     const onWorkspaceAgentConfigChanged = (event: Event) => {
@@ -575,7 +579,7 @@ export function useAgentLaunchConfig({
   }, [effectiveAgent, workspaceId])
 
   useEffect(() => {
-    if (managedWorkspaceLaunch || effectiveAgent === null || workspaceId === null) return
+    if (nativeOnly || managedWorkspaceLaunch || effectiveAgent === null || workspaceId === null) return
     let live = true
     void Promise.allSettled([
       detectWorkspaceCredential(workspaceId, effectiveAgent),
@@ -592,7 +596,7 @@ export function useAgentLaunchConfig({
       })
     })
     return () => { live = false }
-  }, [agentConfigRevision, effectiveAgent, managedWorkspaceLaunch, needsCredential, workspaceId])
+  }, [agentConfigRevision, effectiveAgent, managedWorkspaceLaunch, nativeOnly, needsCredential, workspaceId])
 
   const workspaceCredentialReady = needsCredential &&
     agentReadiness?.ready === true &&
@@ -613,7 +617,9 @@ export function useAgentLaunchConfig({
       ? 'native'
       : launchAccessMode(scopedRecentLaunch)
   )
-  const accessMode: AgentLaunchAccessMode = requestedAccessMode === 'vault' && !(
+  const accessMode: AgentLaunchAccessMode = nativeOnly
+    ? 'native'
+    : requestedAccessMode === 'vault' && !(
         scopedPickedAccess?.slug
           ? credentials?.some((candidate) => candidate.slug === scopedPickedAccess.slug) === true
           : recentCredentialAvailable
@@ -663,12 +669,16 @@ export function useAgentLaunchConfig({
   const recentTupleMatchesCredential = scopedRecentLaunch !== null &&
     launchAccessMode(scopedRecentLaunch) === accessMode &&
     scopedRecentLaunch.credentialSlug === (launchCredentialSlug ?? null)
-  const launchModel = recentTupleMatchesCredential
-    ? scopedRecentLaunch.model ?? undefined
-    : undefined
-  const selectedReasoningEffort = recentTupleMatchesCredential
-    ? scopedRecentLaunch.reasoningEffort ?? undefined
-    : undefined
+  const launchModel = nativeOnly
+    ? undefined
+    : recentTupleMatchesCredential
+      ? scopedRecentLaunch.model ?? undefined
+      : undefined
+  const selectedReasoningEffort = nativeOnly
+    ? undefined
+    : recentTupleMatchesCredential
+      ? scopedRecentLaunch.reasoningEffort ?? undefined
+      : undefined
   const baseAiDetails = accessMode === 'native'
     ? null
     : resolveAgentLaunchAiDetails(
@@ -684,18 +694,20 @@ export function useAgentLaunchConfig({
     : baseAiDetails?.model ?? null
   const effectiveModel = launchModel ?? defaultModel
   const modelCatalog = useProviderModels({
-    request: accessMode !== 'native' && credential && effectiveAgent
-      ? { slug: credential.slug, agent: effectiveAgent }
-      : effectiveAgent && accessMode !== 'vault' && !effectiveCredential
-        ? { native: effectiveAgent, ...(workspaceId ? { workspaceId } : {}) } : null,
-    fallback: runtimeModelOptions({
+    request: nativeOnly
+      ? null
+      : accessMode !== 'native' && credential && effectiveAgent
+        ? { slug: credential.slug, agent: effectiveAgent }
+        : effectiveAgent && accessMode !== 'vault' && !effectiveCredential
+          ? { native: effectiveAgent, ...(workspaceId ? { workspaceId } : {}) } : null,
+    fallback: nativeOnly ? [] : runtimeModelOptions({
       agent: effectiveAgent,
       // Installation defaults and detected Workspace credentials are Vault-backed too.
       credential: accessMode === 'native' ? null : credential,
       defaultModel,
       presets,
     }),
-    model: effectiveModel, agent: effectiveAgent,
+    model: nativeOnly ? null : effectiveModel, agent: effectiveAgent,
   })
   const modelOptions = modelCatalog.models
   const selectedModelSemantics = modelCatalog.semantics
@@ -712,32 +724,33 @@ export function useAgentLaunchConfig({
         source: 'new-injection' as const,
       }
     : baseAiDetails
-  const noCredentials = accessMode !== 'native' && needsCredential &&
+  const noCredentials = !nativeOnly && accessMode !== 'native' && needsCredential &&
     workspaceConfigResolved &&
     !workspaceCredentialReady &&
     !selectedRuntimeUsesGlobalConfig &&
     credentials !== null &&
     credentials.length === 0
-  const credentialSelectionReady = accessMode === 'native' || !needsCredential || selectedRuntimeUsesGlobalConfig || (
+  const credentialSelectionReady = nativeOnly || accessMode === 'native' || !needsCredential || selectedRuntimeUsesGlobalConfig || (
     credentials !== null && workspaceConfigResolved && preferences.loaded
   )
 
   const selectAgent = useCallback((agent: string) => {
     setSelectedAgentId(agent)
     setPickedCredential(null)
+    const nextNativeOnly = agents.find((candidate) => candidate.id === agent)?.capabilities.aiProvider?.nativeOnly === true
     const launch = {
       agent,
-      accessMode: preferences.lastCredentialByAgent[agent] ? 'vault' as const : managedWorkspaceLaunch ? 'native' as const : 'auto' as const,
-      credentialSlug: preferences.lastCredentialByAgent[agent] ?? null,
+      accessMode: nextNativeOnly ? 'native' as const : preferences.lastCredentialByAgent[agent] ? 'vault' as const : managedWorkspaceLaunch ? 'native' as const : 'auto' as const,
+      credentialSlug: nextNativeOnly ? null : preferences.lastCredentialByAgent[agent] ?? null,
       model: null,
       reasoningEffort: null,
     }
     immediateLaunchRef.current = launch
     void preferences.rememberLaunch(launch)
-  }, [managedWorkspaceLaunch, preferences])
+  }, [agents, managedWorkspaceLaunch, preferences])
 
   const selectCredential = useCallback((credentialSlug: string) => {
-    if (!canSelectCredential || effectiveAgent === null) return
+    if (!canSelectCredential || nativeOnly || effectiveAgent === null) return
     setPickedCredential({ agent: effectiveAgent, workspaceId, accessMode: 'vault', slug: credentialSlug })
     const launch = {
       agent: effectiveAgent,
@@ -748,10 +761,10 @@ export function useAgentLaunchConfig({
     }
     immediateLaunchRef.current = launch
     void preferences.rememberLaunch(launch)
-  }, [canSelectCredential, effectiveAgent, preferences, workspaceId])
+  }, [canSelectCredential, effectiveAgent, nativeOnly, preferences, workspaceId])
 
   const selectRuntimeDefault = useCallback(() => {
-    if (!canSelectCredential || effectiveAgent === null) return
+    if (!canSelectCredential || nativeOnly || effectiveAgent === null) return
     setPickedCredential({ agent: effectiveAgent, workspaceId, accessMode: 'native', slug: null })
     const launch = {
       agent: effectiveAgent,
@@ -762,10 +775,10 @@ export function useAgentLaunchConfig({
     }
     immediateLaunchRef.current = launch
     void preferences.rememberLaunch(launch)
-  }, [canSelectCredential, effectiveAgent, preferences, workspaceId])
+  }, [canSelectCredential, effectiveAgent, nativeOnly, preferences, workspaceId])
 
   const selectWorkspaceDefault = useCallback(() => {
-    if (effectiveAgent === null) return
+    if (nativeOnly || effectiveAgent === null) return
     setPickedCredential({ agent: effectiveAgent, workspaceId, accessMode: 'auto', slug: null })
     const launch = {
       agent: effectiveAgent,
@@ -776,10 +789,10 @@ export function useAgentLaunchConfig({
     }
     immediateLaunchRef.current = launch
     void preferences.rememberLaunch(launch)
-  }, [effectiveAgent, preferences, workspaceId])
+  }, [effectiveAgent, nativeOnly, preferences, workspaceId])
 
   const selectModel = useCallback((model: string | null) => {
-    if (effectiveAgent === null) return
+    if (nativeOnly || effectiveAgent === null) return
     const launch = {
       agent: effectiveAgent,
       accessMode,
@@ -789,10 +802,10 @@ export function useAgentLaunchConfig({
     }
     immediateLaunchRef.current = launch
     void preferences.rememberLaunch(launch)
-  }, [accessMode, effectiveAgent, launchCredentialSlug, preferences])
+  }, [accessMode, effectiveAgent, launchCredentialSlug, nativeOnly, preferences])
 
   const selectReasoningEffort = useCallback((reasoningEffort: ModelReasoningEffort | null) => {
-    if (effectiveAgent === null) return
+    if (nativeOnly || effectiveAgent === null) return
     const immediate = immediateLaunchRef.current
     const model = immediate?.agent === effectiveAgent &&
       launchAccessMode(immediate) === accessMode &&
@@ -808,7 +821,7 @@ export function useAgentLaunchConfig({
     }
     immediateLaunchRef.current = launch
     void preferences.rememberLaunch(launch)
-  }, [accessMode, effectiveAgent, launchCredentialSlug, launchModel, preferences])
+  }, [accessMode, effectiveAgent, launchCredentialSlug, launchModel, nativeOnly, preferences])
 
   const resetCredentialSelection = useCallback(() => setPickedCredential(null), [])
 
@@ -819,6 +832,7 @@ export function useAgentLaunchConfig({
     runtimeReadiness,
     selectedRuntimeReadiness,
     needsCredential,
+    nativeOnly,
     canSelectCredential,
     accessMode,
     credentials,
@@ -869,6 +883,7 @@ export function useAgentLaunchConfig({
     modelOptions,
     modelCatalog,
     needsCredential,
+    nativeOnly,
     noCredentials,
     runtimeReadiness,
     selectAgent,

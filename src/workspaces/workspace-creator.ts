@@ -259,12 +259,25 @@ export class WorkspaceCreator {
         ...(template.agentCredentials ?? {}),
       };
       if (Object.keys(effective).length > 0) {
-        const credentials = await readCredentials();
+        let credentials: Awaited<ReturnType<typeof readCredentials>> | null = null;
         const settings = emptyWorkspaceRuntimeSettings();
         const rememberedAgents: string[] = [];
         for (const [agentId, decl] of Object.entries(effective)) {
           const adapter = this.opts.adapterRegistry.get(agentId);
-          const credential = credentials[decl.credentialSlug];
+          if (adapter?.capabilities.aiProvider?.nativeOnly) {
+            // Native-only runtimes own their provider. Record a secret-free
+            // native preference so the template's chosen agent (and the
+            // remembered/default-agent selection below) still wins.
+            const preference: WorkspaceRuntimePreference = { accessMode: 'native' };
+            settings.runtime.interactive.agents[agentId] = preference;
+            settings.runtime.headless.agents[agentId] = preference;
+            rememberedAgents.push(agentId);
+            log.info('workspace.runtime_settings_seed_native', { agentId });
+            continue;
+          }
+          const vault: Awaited<ReturnType<typeof readCredentials>> = credentials ?? await readCredentials();
+          credentials = vault;
+          const credential = vault[decl.credentialSlug];
           if (!adapter || !credential) {
             log.warn('workspace.runtime_settings_seed_skipped', {
               agentId,

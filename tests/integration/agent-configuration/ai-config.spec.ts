@@ -380,292 +380,62 @@ describe('codexAdapter AI-config', () => {
 });
 
 describe('opencodeAdapter AI-config', () => {
-  const mcpEnv = { OPENALICE_MCP_URL: 'http://127.0.0.1:47332/mcp', AQ_WS_ID: 'ws-abc' };
-
-  it('uses the title returned by OpenCode session list', () => {
-    expect(openCodeSessionTitle([
-      { id: 'ses_1', title: '  Native OpenCode title  ' },
-    ], 'ses_1')).toBe('Native OpenCode title');
-    expect(openCodeSessionTitle([], 'ses_1')).toBeNull();
-  });
-
-  it('prepares OpenCode to derive its theme from the terminal palette', async () => {
-    await mkdir(join(dir, '.git/info'), { recursive: true });
-    await writeFile(join(dir, '.git/info/exclude'), 'existing.local\n');
-
-    await prepareAgentRuntimeWorkspace(opencodeAdapter, {
-      wsId: 'ws-abc',
-      cwd: dir,
-      launcherRepoRoot: '/repo',
-    });
-    await prepareAgentRuntimeWorkspace(opencodeAdapter, {
-      wsId: 'ws-abc',
-      cwd: dir,
-      launcherRepoRoot: '/repo',
-    });
-
-    expect(JSON.parse(await read('tui.json'))).toEqual({
-      $schema: 'https://opencode.ai/tui.json',
-      theme: 'system',
-    });
-    expect((await read('.git/info/exclude')).split(/\r?\n/).filter((line) => line === 'tui.json'))
-      .toEqual(['tui.json']);
-  });
-
-  it('preserves an explicit OpenCode project theme and sibling TUI settings', async () => {
-    await writeFile(join(dir, 'tui.json'), JSON.stringify({ theme: 'catppuccin', scroll_speed: 2 }));
-
-    await prepareAgentRuntimeWorkspace(opencodeAdapter, {
-      wsId: 'ws-abc',
-      cwd: dir,
-      launcherRepoRoot: '/repo',
-    });
-
-    expect(JSON.parse(await read('tui.json'))).toEqual({ theme: 'catppuccin', scroll_speed: 2 });
-  });
-
-  it('adds the system theme without replacing sibling TUI settings', async () => {
-    await writeFile(join(dir, 'tui.json'), JSON.stringify({ scroll_speed: 2 }));
-
-    await prepareAgentRuntimeWorkspace(opencodeAdapter, {
-      wsId: 'ws-abc',
-      cwd: dir,
-      launcherRepoRoot: '/repo',
-    });
-
-    expect(JSON.parse(await read('tui.json'))).toEqual({
-      scroll_speed: 2,
-      $schema: 'https://opencode.ai/tui.json',
-      theme: 'system',
-    });
-  });
-
-  it('leaves a legacy OpenCode theme in provider config for native migration', async () => {
-    await writeFile(join(dir, 'opencode.json'), JSON.stringify({ theme: 'system', share: 'disabled' }));
-
-    await prepareAgentRuntimeWorkspace(opencodeAdapter, {
-      wsId: 'ws-abc',
-      cwd: dir,
-      launcherRepoRoot: '/repo',
-    });
-
-    expect(existsSync(join(dir, 'tui.json'))).toBe(false);
-    expect(JSON.parse(await read('opencode.json'))).toEqual({ theme: 'system', share: 'disabled' });
-  });
-
-  it('leaves JSONC TUI configuration to OpenCode', async () => {
-    await writeFile(join(dir, 'tui.jsonc'), '{ // user-owned\n  "scroll_speed": 2\n}\n');
-
-    await prepareAgentRuntimeWorkspace(opencodeAdapter, {
-      wsId: 'ws-abc',
-      cwd: dir,
-      launcherRepoRoot: '/repo',
-    });
-
-    expect(existsSync(join(dir, 'tui.json'))).toBe(false);
-    expect(await read('tui.jsonc')).toBe('{ // user-owned\n  "scroll_speed": 2\n}\n');
-  });
-
-  it('keeps OpenAlice MCP out of opencode env even when an MCP URL is present', () => {
-    const env = opencodeAdapter.composeEnv!({ cwd: dir, env: mcpEnv });
-    expect(env['OPENCODE_DISABLE_MODELS_FETCH']).toBe('1');
-    // Match the terminal wrapper: auto-update stays enabled, and the app never
-    // injects an OPENCODE_CONFIG_CONTENT or permission override here.
-    expect(env['OPENCODE_DISABLE_AUTOUPDATE']).toBeUndefined();
-    expect(env['OPENCODE_DISABLE_LSP_DOWNLOAD']).toBe('1');
-    expect(env['OPENCODE_CONFIG_CONTENT']).toBeUndefined();
-  });
-
-  it('composeCommand: fresh is the bare binary; resume uses top-level flags', () => {
-    expect(opencodeAdapter.composeCommand(['ignored'], { cwd: dir, env: mcpEnv })).toEqual(['opencode']);
-    expect(opencodeAdapter.composeCommand([], { cwd: dir, env: mcpEnv, resume: 'last' }))
-      .toEqual(['opencode', '--continue']);
-    expect(opencodeAdapter.composeCommand([], { cwd: dir, env: mcpEnv, resume: { sessionId: 'ses_123' } }))
-      .toEqual(['opencode', '--session', 'ses_123']);
-  });
-
-  it('writes a custom OpenAI-compatible provider opencode.json', async () => {
-    await opencodeAdapter.writeAiConfig!(dir, {
-      baseUrl: 'https://cn.test/v1', apiKey: 'sk-o', model: 'deepseek-chat',
-    });
-    expect(JSON.parse(await read('opencode.json'))).toMatchObject({
-      $schema: 'https://opencode.ai/config.json',
-      provider: {
-        workspace: {
-          npm: '@ai-sdk/openai-compatible',
-          name: 'OpenAlice workspace provider',
-          options: { baseURL: 'https://cn.test/v1', apiKey: 'sk-o' },
-          models: {
-            'deepseek-chat': {
-              name: 'deepseek-chat',
-              variants: {
-                none: { reasoningEffort: 'none' },
-                high: { reasoningEffort: 'high' },
-                max: { reasoningEffort: 'max' },
-              },
-            },
-          },
-        },
-      },
-      model: 'workspace/deepseek-chat',
-    });
-  });
-
-  it('writes an explicit custom-model context window for opencode when provided', async () => {
-    await opencodeAdapter.writeAiConfig!(dir, {
-      baseUrl: 'https://cn.test/v1', apiKey: 'sk-o', model: 'deepseek-chat', contextWindow: 1_000_000,
-    });
-    expect(JSON.parse(await read('opencode.json')).provider.workspace.models['deepseek-chat']).toMatchObject({
-      name: 'deepseek-chat',
-      limit: { context: 1_000_000, output: 16_384 },
-    });
-  });
-
-  it.each([true, false])('round-trips opencode reasoning=%s', async (reasoning) => {
-    await opencodeAdapter.writeAiConfig!(dir, {
-      baseUrl: 'https://cn.test/v1',
-      model: 'reasoning-model',
-      contextWindow: 256_000,
-      reasoning,
-    });
-    expect(JSON.parse(await read('opencode.json')).provider.workspace.models['reasoning-model'])
-      .toMatchObject({ reasoning });
-    expect(await opencodeAdapter.readAiConfig!(dir)).toMatchObject({ reasoning });
-  });
-
-  it.each([
-    ['openai-chat', 'medium', { reasoningEffort: 'medium' }],
-    ['anthropic', 'high', { effort: 'high' }],
-    ['google-generative-ai', 'low', { thinkingConfig: { includeThoughts: true, thinkingLevel: 'low' } }],
-  ] as const)('projects %s effort into model options and round-trips it', async (wireShape, reasoningEffort, options) => {
-    await opencodeAdapter.writeAiConfig!(dir, {
-      baseUrl: 'https://provider.test', model: 'reasoning-model', wireShape, reasoningEffort,
-    });
-    expect(JSON.parse(await read('opencode.json')).provider.workspace.models['reasoning-model'].options)
-      .toEqual(options);
-    expect(await opencodeAdapter.readAiConfig!(dir)).toMatchObject({ reasoningEffort });
-  });
-
-  it('enables adaptive thinking when projecting effort for a current Claude model', async () => {
-    await opencodeAdapter.writeAiConfig!(dir, {
-      baseUrl: 'https://api.anthropic.com',
-      model: 'claude-sonnet-4-6',
-      wireShape: 'anthropic',
-      reasoningEffort: 'high',
-    });
-    expect(JSON.parse(await read('opencode.json')).provider.workspace.models['claude-sonnet-4-6'].options)
-      .toEqual({ thinking: { type: 'adaptive' }, effort: 'high' });
-    expect(await opencodeAdapter.readAiConfig!(dir)).toMatchObject({ reasoningEffort: 'high' });
-  });
-
-  it('honors wireShape — Anthropic, Google, and OpenAI Responses use their native SDKs', async () => {
-    await opencodeAdapter.writeAiConfig!(dir, { baseUrl: 'https://x/anthropic', apiKey: 'k', model: 'glm-5.1', wireShape: 'anthropic' });
-    expect(JSON.parse(await read('opencode.json')).provider.workspace.npm).toBe('@ai-sdk/anthropic');
-    await opencodeAdapter.writeAiConfig!(dir, { baseUrl: 'https://x/google', apiKey: 'AQ.k', model: 'gemini', wireShape: 'google-generative-ai' });
-    expect(JSON.parse(await read('opencode.json')).provider.workspace.npm).toBe('@ai-sdk/google');
-    expect((await opencodeAdapter.readAiConfig!(dir))?.wireShape).toBe('google-generative-ai');
-    await opencodeAdapter.writeAiConfig!(dir, { baseUrl: 'https://x/v1', apiKey: 'k', model: 'gpt-5.5', wireShape: 'openai-responses' });
-    expect(JSON.parse(await read('opencode.json')).provider.workspace.npm).toBe('@ai-sdk/openai');
-  });
-
-  it('writes Anthropic bearer auth without a conflicting x-api-key and round-trips it', async () => {
-    await opencodeAdapter.writeAiConfig!(dir, {
-      baseUrl: 'https://api.minimax.io/anthropic',
-      apiKey: 'mm-key',
-      model: 'MiniMax-M3',
-      wireShape: 'anthropic',
-      authMode: 'bearer',
-    });
-    const options = JSON.parse(await read('opencode.json')).provider.workspace.options;
-    expect(options).toEqual({
-      baseURL: 'https://api.minimax.io/anthropic',
-      headers: { Authorization: 'Bearer mm-key' },
-    });
-    expect(await opencodeAdapter.readAiConfig!(dir)).toMatchObject({
-      apiKey: 'mm-key',
-      wireShape: 'anthropic',
-      authMode: 'bearer',
-    });
-  });
-
-  it('writes the automatic MiniMax opencode binding through native Anthropic thinking blocks', async () => {
-    const cred = credentialToWorkspaceAiCred({
-      vendor: 'minimax',
-      apiKey: 'mm-key',
-      wires: {
-        anthropic: 'https://api.minimax.io/anthropic',
-        'openai-chat': 'https://api.minimax.io/v1',
-      },
-    }, opencodeAdapter, { model: 'MiniMax-M2.5' })!;
-
-    await opencodeAdapter.writeAiConfig!(dir, cred);
-    const config = JSON.parse(await read('opencode.json'));
-    expect(config.provider.workspace).toMatchObject({
-      npm: '@ai-sdk/anthropic',
-      options: {
-        baseURL: 'https://api.minimax.io/anthropic',
-        headers: { Authorization: 'Bearer mm-key' },
-      },
-      models: {
-        'MiniMax-M2.5': {
-          name: 'MiniMax-M2.5',
-          reasoning: true,
-          limit: { context: 204_800, output: 16_384 },
-        },
-      },
-    });
-    expect(config.model).toBe('workspace/MiniMax-M2.5');
-  });
-
-  it('reset (empty cred) deletes opencode.json', async () => {
-    await opencodeAdapter.writeAiConfig!(dir, { baseUrl: 'u', model: 'm' });
-    await opencodeAdapter.writeAiConfig!(dir, {});
+  it('rejects the legacy Workspace provider writer (native-only)', async () => {
+    await expect(opencodeAdapter.writeAiConfig!(dir, {
+      baseUrl: 'https://api.example.test/v1',
+      apiKey: 'secret',
+      model: 'custom-model',
+      wireShape: 'openai-chat',
+    })).rejects.toThrow(/native-only/);
     expect(existsSync(join(dir, 'opencode.json'))).toBe(false);
   });
 
-  it('preserves unrelated opencode config and restores the previous provider/model on reset', async () => {
+  it('never reads a legacy Workspace provider binding', async () => {
     await writeFile(join(dir, 'opencode.json'), JSON.stringify({
-      $schema: 'https://example.test/custom-schema.json',
-      theme: 'system',
+      provider: { workspace: { options: { apiKey: 'legacy-secret' } } },
+      model: 'workspace/custom-model',
+    }));
+    await expect(opencodeAdapter.readAiConfig!(dir)).resolves.toBeNull();
+  });
+
+  it('keeps a pre-existing opencode.json untouched when the writer is rejected', async () => {
+    const original = JSON.stringify({ theme: 'system' }, null, 2) + '\n';
+    await writeFile(join(dir, 'opencode.json'), original);
+    await expect(opencodeAdapter.writeAiConfig!(dir, { apiKey: 'secret' })).rejects.toThrow(/native-only/);
+    expect(await read('opencode.json')).toBe(original);
+  });
+
+  it('removes a legacy OpenAlice-owned Workspace provider key on prepare', async () => {
+    await writeFile(join(dir, 'opencode.json'), JSON.stringify({
+      $schema: 'https://opencode.ai/config.json',
       provider: {
-        other: { npm: '@ai-sdk/other' },
-        workspace: { npm: '@ai-sdk/legacy', name: 'User workspace provider' },
+        workspace: {
+          name: 'OpenAlice workspace provider',
+          npm: '@ai-sdk/openai-compatible',
+          options: { apiKey: 'legacy-secret', baseURL: 'https://legacy.test/v1' },
+        },
       },
-      model: 'other/old-model',
+      model: 'workspace/custom-model',
     }, null, 2));
+    await opencodeAdapter.lifecycle!.prepareWorkspace!({ cwd: dir, wsId: 'ws-1', launcherRepoRoot: dir });
+    const config = JSON.parse(await read('opencode.json'));
+    expect(config.provider).toBeUndefined();
+    expect(config.model).toBeUndefined();
+    expect(JSON.stringify(config)).not.toContain('legacy-secret');
+  });
 
-    await opencodeAdapter.writeAiConfig!(dir, {
-      baseUrl: 'https://provider.test/v1', apiKey: 'key', model: 'new-model', reasoning: true,
-    });
-    const injected = JSON.parse(await read('opencode.json'));
-    expect(injected.theme).toBe('system');
-    expect(injected.provider.other).toEqual({ npm: '@ai-sdk/other' });
-    expect(injected.provider.workspace.models['new-model'].reasoning).toBe(true);
-
-    await opencodeAdapter.writeAiConfig!(dir, {});
-    expect(JSON.parse(await read('opencode.json'))).toEqual({
-      $schema: 'https://example.test/custom-schema.json',
-      theme: 'system',
+  it('preserves a user-owned Workspace provider on prepare', async () => {
+    const original = JSON.stringify({
       provider: {
-        other: { npm: '@ai-sdk/other' },
-        workspace: { npm: '@ai-sdk/legacy', name: 'User workspace provider' },
+        workspace: {
+          name: 'My own provider',
+          options: { apiKey: 'user-key' },
+        },
       },
-      model: 'other/old-model',
-    });
-    expect(existsSync(join(dir, '.opencode/openalice-provider.json'))).toBe(false);
-  });
-
-  it('round-trips through readAiConfig (strips the provider/ prefix off model)', async () => {
-    await opencodeAdapter.writeAiConfig!(dir, {
-      baseUrl: 'https://cn.test/v1', apiKey: 'sk-o', model: 'deepseek-chat', contextWindow: 512_000,
-    });
-    expect(await opencodeAdapter.readAiConfig!(dir)).toEqual({
-      baseUrl: 'https://cn.test/v1', apiKey: 'sk-o', model: 'deepseek-chat', wireShape: 'openai-chat', contextWindow: 512_000,
-    });
-  });
-
-  it('readAiConfig returns null when no file exists', async () => {
-    expect(await opencodeAdapter.readAiConfig!(dir)).toBeNull();
+    }, null, 2) + '\n';
+    await writeFile(join(dir, 'opencode.json'), original);
+    await opencodeAdapter.lifecycle!.prepareWorkspace!({ cwd: dir, wsId: 'ws-1', launcherRepoRoot: dir });
+    expect(await read('opencode.json')).toBe(original);
   });
 });
 

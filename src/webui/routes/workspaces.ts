@@ -480,6 +480,7 @@ export function createWorkspaceRoutes(
               'interactive',
               adapter.id,
               explicitSelection,
+              adapter.capabilities.aiProvider?.nativeOnly,
             )
           : explicitSelection) ?? {};
         sessionRuntime = requestedIdentity
@@ -887,6 +888,8 @@ export function createWorkspaceRoutes(
   } | null> => {
     const adapter = svc.adapters.get(agentId);
     if (!adapter?.readAiConfig) return null;
+    // Native-only runtimes never expose a legacy Workspace provider binding.
+    if (adapter.capabilities.aiProvider?.nativeOnly) return null;
     const cfg = await adapter.readAiConfig(meta.dir).catch(() => null);
     if (!cfg) return null;
     const slug = matchCredentialByApiKey(credentials, cfg.apiKey);
@@ -1389,6 +1392,13 @@ export function createWorkspaceRoutes(
         const error = validateAgent(mode, agent);
         if (error) return c.json({ error: 'invalid_agent', message: error }, 400);
         if (preference.accessMode === 'vault') {
+          const adapter = svc.adapters.get(agent)!;
+          if (adapter.capabilities.aiProvider?.nativeOnly) {
+            return c.json({
+              error: 'native_only',
+              message: `${agent} uses its native provider; vault credentials are not configurable`,
+            }, 400);
+          }
           const credential = credentials[preference.credentialSlug];
           if (!credential) {
             return c.json({
@@ -1396,7 +1406,6 @@ export function createWorkspaceRoutes(
               message: `credential not found: ${preference.credentialSlug}`,
             }, 400);
           }
-          const adapter = svc.adapters.get(agent)!;
           if (!compatibleCredentials(credentials, adapter).some(([slug]) => slug === preference.credentialSlug)) {
             return c.json({
               error: 'credential_incompatible',
@@ -3140,20 +3149,18 @@ export function createWorkspaceRoutes(
 
 
   // Central credential store, surfaced to the workspace AI-config modal. The
-  // "Load from saved credential" picker reads this list; the "Save to Alice"
-  // dialog POSTs here so a hand-entered provider becomes reusable. apiKey is
-  // returned so the picker can flash it into the form (same exposure as the
-  // legacy agent-profiles route; both are behind the admin-token gate).
+  // desktop build is native-only; the picker never receives raw key material.
   app.get('/credentials', async (c) => {
     try {
-      const credentials = await readCredentials();
       // `?agent=<id>` filters to the credentials that agent can actually be
-      // driven by (its wire shapes) — the quick-chat runtime dropdown uses this
-      // so it never offers a cred the agent can't speak. apiKey omitted in this
-      // mode; the dropdown receives only presentation/injection metadata, while
-      // the unfiltered Workspace modal keeps the key-bearing response.
+      // driven by (its wire shapes). Check native-only before reading the vault:
+      // opencode must not even load key material it can never use.
       const agent = c.req.query('agent');
       const adapter = agent ? svc.adapters.get(agent) : undefined;
+      if (agent && adapter?.capabilities.aiProvider?.nativeOnly) {
+        return c.json({ credentials: [] });
+      }
+      const credentials = await readCredentials();
       const entries = agent
         ? adapter ? compatibleCredentials(credentials, adapter) : []
         : Object.entries(credentials);
@@ -3181,7 +3188,9 @@ export function createWorkspaceRoutes(
             ? { resolvedReasoningEffort: projected.reasoningEffort }
             : {}),
           ...(reasoningMode ? { resolvedReasoningMode: reasoningMode } : {}),
-          ...(agent ? {} : { apiKey: cred.apiKey ?? null }),
+          // Never return raw key material over HTTP. The UI only needs presence;
+          // edits that keep an existing key use the empty-key convention.
+          hasApiKey: !!cred.apiKey,
         };
       });
       return c.json({ credentials: list });
@@ -3236,10 +3245,13 @@ export function createWorkspaceRoutes(
       const configurable = svc.adapters.list().filter(
         (adapter) => adapter.capabilities.aiProvider && adapter.readAiConfig,
       );
-      const entries = await Promise.all(configurable.map(async (adapter) => [
-        adapter.id,
-        await adapter.readAiConfig!(meta.dir),
-      ] as const));
+      const entries = await Promise.all(configurable.map(async (adapter) => {
+        const cfg = await adapter.readAiConfig!(meta.dir)
+        // Deprecated compatibility route: never return raw key material over
+        // HTTP. The desktop UI does not consume this bundle; non-desktop
+        // callers can still detect `hasApiKey` and use the empty-key convention.
+        return [adapter.id, cfg ? { ...cfg, apiKey: null, hasApiKey: !!cfg.apiKey } : cfg] as const
+      }));
       return c.json(Object.fromEntries(entries));
     } catch (err) {
       if (err instanceof PathTraversal) return c.json({ error: 'invalid_path' }, 400);
@@ -3262,8 +3274,9 @@ export function createWorkspaceRoutes(
     if (!meta) return c.json({ error: 'not_found' }, 404);
     try {
       const adapter = svc.adapters.get(agent);
+      const nativeOnly = adapter?.capabilities.aiProvider?.nativeOnly === true;
       const [detected, interactiveSetupStatus] = await Promise.all([
-        detectWorkspaceCred(meta, agent, await readCredentials()),
+        nativeOnly ? null : detectWorkspaceCred(meta, agent, await readCredentials()),
         adapter?.readInteractiveSetupStatus?.(meta.dir).catch(() => 'unknown' as const) ?? null,
       ]);
       return c.json({
@@ -3339,6 +3352,12 @@ export function createWorkspaceRoutes(
     if (!adapter?.capabilities.aiProvider || !adapter.writeAiConfig) {
       return c.json({ error: 'unknown_agent' }, 400);
     }
+    if (adapter.capabilities.aiProvider.nativeOnly) {
+      return c.json({
+        error: 'native_only',
+        message: `${agent} uses its native provider; Workspace AI config is disabled`,
+      }, 409);
+    }
     const meta = svc.resolveRuntimeWorkspace?.(id) ?? svc.registry.get(id);
     if (!meta) return c.json({ error: 'not_found' }, 404);
 
@@ -3390,6 +3409,9 @@ export function createWorkspaceRoutes(
     if (!validId(id)) return c.json({ ok: false, error: 'invalid_id' }, 400);
     if (!svc.adapters.get(agent)?.capabilities.aiProvider) {
       return c.json({ ok: false, error: 'unknown_agent' }, 400);
+    }
+    if (svc.adapters.get(agent)?.capabilities.aiProvider?.nativeOnly) {
+      return c.json({ ok: false, error: 'native_only', message: `${agent} uses its native provider` }, 409);
     }
 
     const body = (await safeJson(c)) as WorkspaceAiCred | null;

@@ -1,6 +1,6 @@
 import { discoverNativeModels } from '../native-model-discovery.js';
 import { execFile } from 'node:child_process';
-import { readFileSync, statSync } from 'node:fs';
+import { statSync } from 'node:fs';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 
@@ -11,37 +11,23 @@ import type {
   SpawnContext,
   WorkspaceAiCred,
 } from '../cli-adapter.js';
-import {
-  MODEL_REASONING_EFFORTS,
-  isModelReasoningEffort,
-  type ModelReasoningEffort,
-} from '../../ai-providers/model-semantics.js';
 import { readWorkspaceFile, writeWorkspaceFile } from '../file-service.js';
 import type { HeadlessOutputEvent } from '../headless-output.js';
-import { resetOwnedJsonConfig, writeOwnedJsonConfig } from './owned-json-config.js';
+import { resetOwnedJsonConfig } from './owned-json-config.js';
 import {
   OPENCODE_TRADE_AGENT,
   OPENCODE_TRADE_AGENT_ID,
   OPENCODE_TRADE_MODEL,
-  OPENCODE_TRADE_MODEL_ID,
   OPENCODE_TRADE_VARIANT,
 } from './opencode-trade-agent.js';
 
 const execFileAsync = promisify(execFile);
 
 const OPENCODE_CONFIG_PATH = 'opencode.json';
+const OPENCODE_BINDING_STATE_PATH = '.opencode/openalice-provider.json';
 const OPENCODE_TUI_CONFIG_PATH = 'tui.json';
 const OPENCODE_TUI_CONFIGC_PATH = 'tui.jsonc';
-const OPENCODE_BINDING_STATE_PATH = '.opencode/openalice-provider.json';
-const OPENCODE_PROVIDER_NAME = 'workspace';
-const OPENCODE_SESSION_PROVIDER_NAME = 'openalice-session';
 const OPENCODE_SYSTEM_THEME = 'system';
-const OPENCODE_OWNED_PATHS = [
-  ['$schema'],
-  ['provider', OPENCODE_PROVIDER_NAME],
-  ['model'],
-] as const;
-const DEFAULT_OUTPUT_TOKENS = 16_384;
 
 const openCodeSessionRowsInFlight = new Map<string, Promise<readonly Record<string, unknown>[]>>();
 
@@ -86,101 +72,6 @@ export function openCodeSessionTitle(
   const row = rows.find((candidate) => candidate['id'] === sessionId);
   const title = typeof row?.['title'] === 'string' ? row['title'].trim() : '';
   return title || null;
-}
-
-function modelEffortOptions(
-  cred: WorkspaceAiCred,
-  effort = cred.reasoningEffort,
-): Record<string, unknown> | null {
-  if (!effort) return null;
-  if (cred.wireShape === 'anthropic') {
-    if (effort === 'none') return { thinking: { type: 'disabled' } };
-    // Current Claude adaptive models require the thinking mode alongside
-    // output effort. Other Anthropic-compatible providers such as GLM expose
-    // effort directly and can reject Claude-specific thinking objects.
-    const id = cred.model?.toLowerCase() ?? '';
-    return id.includes('claude') || id.includes('fable')
-      ? { thinking: { type: 'adaptive' }, effort }
-      : { effort };
-  }
-  if (cred.wireShape === 'google-generative-ai') {
-    return effort === 'none'
-      ? { thinkingConfig: { includeThoughts: false } }
-      : { thinkingConfig: { includeThoughts: true, thinkingLevel: effort } };
-  }
-  return { reasoningEffort: effort };
-}
-
-function modelEffortVariants(cred: WorkspaceAiCred): Record<string, Record<string, unknown>> | null {
-  if (cred.reasoning === false) return null;
-  return Object.fromEntries(
-    MODEL_REASONING_EFFORTS.map((effort) => [
-      effort,
-      modelEffortOptions(cred, effort) ?? {},
-    ]),
-  );
-}
-
-function openCodeProvider(cred: WorkspaceAiCred, name: string): Record<string, unknown> {
-  const options: Record<string, unknown> = {};
-  if (cred.baseUrl) options['baseURL'] = cred.baseUrl;
-  if (cred.apiKey) {
-    if (cred.wireShape === 'anthropic' && cred.authMode === 'bearer') {
-      options['headers'] = { Authorization: `Bearer ${cred.apiKey}` };
-    } else {
-      options['apiKey'] = cred.apiKey;
-    }
-  }
-  const npm = cred.wireShape === 'anthropic' ? '@ai-sdk/anthropic'
-    : cred.wireShape === 'google-generative-ai' ? '@ai-sdk/google'
-    : cred.wireShape === 'openai-responses' ? '@ai-sdk/openai'
-    : OPENCODE_SDK_NPM;
-  const provider: Record<string, unknown> = { npm, name, options };
-  if (cred.model) {
-    const model: Record<string, unknown> = { name: cred.model };
-    if (typeof cred.reasoning === 'boolean') model['reasoning'] = cred.reasoning;
-    const effortOptions = modelEffortOptions(cred);
-    if (effortOptions) model['options'] = effortOptions;
-    const effortVariants = modelEffortVariants(cred);
-    if (effortVariants) model['variants'] = effortVariants;
-    const contextWindow = positiveNumber(cred.contextWindow);
-    if (contextWindow !== null) {
-      model['limit'] = { context: contextWindow, output: DEFAULT_OUTPUT_TOKENS };
-    }
-    provider['models'] = { [cred.model]: model };
-  }
-  return provider;
-}
-
-function readModelEffort(
-  options: Record<string, unknown>,
-  wireShape: NonNullable<WorkspaceAiCred['wireShape']>,
-): WorkspaceAiCred['reasoningEffort'] {
-  if (wireShape === 'anthropic') {
-    const thinking = options['thinking'];
-    if (thinking && typeof thinking === 'object' && (thinking as Record<string, unknown>)['type'] === 'disabled') {
-      return 'none';
-    }
-    return isModelReasoningEffort(options['effort']) ? options['effort'] : undefined;
-  }
-  if (wireShape === 'google-generative-ai') {
-    const thinking = options['thinkingConfig'];
-    if (!thinking || typeof thinking !== 'object') return undefined;
-    const level = (thinking as Record<string, unknown>)['thinkingLevel'];
-    return isModelReasoningEffort(level) ? level : undefined;
-  }
-  return isModelReasoningEffort(options['reasoningEffort']) ? options['reasoningEffort'] : undefined;
-}
-// opencode's `@ai-sdk/openai-compatible` SDK is statically bundled into the
-// binary (no runtime `npm install`) and speaks `/v1/chat/completions` — the
-// right shape for OpenAI-compatible + Chinese gateways (DeepSeek/Qwen/Kimi/
-// GLM/MiniMax) and local runtimes (ollama/vLLM/LM Studio). v1 provider
-// overrides always use this SDK; an Anthropic-shape override would swap to
-// `@ai-sdk/anthropic` (also bundled) — deferred until there's a real case.
-const OPENCODE_SDK_NPM = '@ai-sdk/openai-compatible';
-
-function positiveNumber(value: number | null | undefined): number | null {
-  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null;
 }
 
 function parseJsonRecord(raw: string | null): Record<string, unknown> | null {
@@ -289,6 +180,50 @@ export async function syncOpenCodeWorkspaceTheme(cwd: string): Promise<boolean> 
  *     transcript watcher polls it, captures the new session's id, and persists
  *     it as resumeHint → `opencode --session <id>` resumes by id.
  */
+/**
+ * Remove the pre-native-only Workspace provider this adapter used to write.
+ * Old workspaces may still contain `provider.workspace.options.apiKey` (and the
+ * reversible state file). Leaving them would keep a plaintext key on disk that
+ * the app no longer uses. State-backed resets restore the user's pre-existing
+ * values; state-less legacy blocks are removed only when they carry the
+ * OpenAlice-owned provider name, so a user's own `provider.workspace` survives.
+ */
+async function resetLegacyWorkspaceProvider(cwd: string): Promise<void> {
+  const state = await readWorkspaceFile(cwd, OPENCODE_BINDING_STATE_PATH);
+  if (state !== null) {
+    await resetOwnedJsonConfig({
+      cwd,
+      configPath: OPENCODE_CONFIG_PATH,
+      statePath: OPENCODE_BINDING_STATE_PATH,
+      label: 'opencode project config',
+    });
+    return;
+  }
+
+  const raw = await readWorkspaceFile(cwd, OPENCODE_CONFIG_PATH);
+  if (raw === null) return;
+  let config: Record<string, unknown>;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return;
+    config = parsed as Record<string, unknown>;
+  } catch {
+    return;
+  }
+  const providers = config['provider'];
+  if (!providers || typeof providers !== 'object' || Array.isArray(providers)) return;
+  const workspace = (providers as Record<string, unknown>)['workspace'];
+  if (!workspace || typeof workspace !== 'object' || Array.isArray(workspace)) return;
+  if ((workspace as Record<string, unknown>)['name'] !== 'OpenAlice workspace provider') return;
+
+  delete (providers as Record<string, unknown>)['workspace'];
+  if (Object.keys(providers as Record<string, unknown>).length === 0) delete config['provider'];
+  if (typeof config['model'] === 'string' && config['model'].startsWith('workspace/')) {
+    delete config['model'];
+  }
+  await writeWorkspaceFile(cwd, OPENCODE_CONFIG_PATH, `${JSON.stringify(config, null, 2)}\n`);
+}
+
 export const opencodeAdapter: CliAdapter = {
   discoverModels: (cwd) => discoverNativeModels('opencode', 'opencode', cwd),
   id: 'opencode',
@@ -312,6 +247,10 @@ export const opencodeAdapter: CliAdapter = {
     web: { wire: 'acp', permissionPrompts: true, freshSession: true },
     aiProvider: {
       credentialSource: 'runtime-or-workspace',
+      // OpenAlice uses opencode's native DeepSeek provider from the shared
+      // opencode config/auth store. Vault credentials and Workspace provider
+      // files are not offered for this adapter.
+      nativeOnly: true,
       wirePreference: ['google-generative-ai', 'openai-chat', 'anthropic', 'openai-responses'],
       defaultWire: 'openai-chat',
       vendorPolicies: {
@@ -329,42 +268,22 @@ export const opencodeAdapter: CliAdapter = {
   },
 
   sessionRuntime: {
-    project(_ctx, runtime: ResolvedSessionRuntimeBinding) {
-      const ai = runtime.ai;
-      const model = runtime.binding.model;
-      // DeepSeek is the app's default Trade provider. Lock it to the stable
-      // `deepseek-flash` alias at the highest effort, ignoring a stale session
-      // binding or an advanced-settings override. The backend maps the alias
-      // to the current Flash revision, so no dated model id is pinned. Other
-      // providers keep the generic binding behavior.
-      const isDeepSeek = !ai
-        || (ai.baseUrl
-          ? ai.baseUrl.toLowerCase().includes('deepseek')
-          : (ai.model ?? '').toLowerCase().includes('deepseek'));
-      const lockedModel = isDeepSeek
-        ? (ai && (ai.apiKey || ai.baseUrl)
-            ? `${OPENCODE_SESSION_PROVIDER_NAME}/${OPENCODE_TRADE_MODEL_ID}`
-            : OPENCODE_TRADE_MODEL)
-        : null;
-      const selectedModel = lockedModel ?? (
-        ai && (ai.apiKey || ai.baseUrl) && model
-          ? `${OPENCODE_SESSION_PROVIDER_NAME}/${model}`
-          : model
-      );
-      const reasoningEffort = lockedModel
-        ? OPENCODE_TRADE_VARIANT
-        : runtime.binding.reasoningEffort;
-      const tradeAgent = lockedModel
-        ? { ...OPENCODE_TRADE_AGENT, model: lockedModel, variant: OPENCODE_TRADE_VARIANT }
-        : OPENCODE_TRADE_AGENT;
-      const interactiveArgs = [
-        ...(selectedModel ? ['--model', selectedModel] : []),
-      ];
+    project(_ctx, _runtime: ResolvedSessionRuntimeBinding) {
+      // OpenAlice runs opencode native-only: the shared opencode config/auth
+      // store supplies DeepSeek, and this process-local overlay selects the
+      // app-owned Trade profile pinned to the stable `deepseek-flash` alias at
+      // max effort. No provider block is injected, so no key leaves the seat.
+      const selectedModel = OPENCODE_TRADE_MODEL;
+      const reasoningEffort = OPENCODE_TRADE_VARIANT;
+      const tradeAgent = {
+        ...OPENCODE_TRADE_AGENT,
+        model: selectedModel,
+        variant: reasoningEffort,
+      };
+      const interactiveArgs = ['--model', selectedModel];
       const headlessArgs = [
         ...interactiveArgs,
-        ...(reasoningEffort
-          ? ['--variant', reasoningEffort]
-          : []),
+        '--variant', reasoningEffort,
         // Scheduled/issue runs are OpenAlice work: select the same app-owned
         // Trade profile the GUI defaults to. The profile tells headless runs
         // to recommend and report, never to execute an order without approval.
@@ -386,28 +305,10 @@ export const opencodeAdapter: CliAdapter = {
         agent: {
           [OPENCODE_TRADE_AGENT_ID]: tradeAgent,
         },
+        // ACP has no --model flag. Its native config selects the default model
+        // for session/new; keep this process-local.
+        model: selectedModel,
       };
-      if (ai && (ai.apiKey || ai.baseUrl)) {
-        // Keep the workspace provider and wire shape, but expose the stable
-        // Flash alias with the locked max effort. This keeps the agent model
-        // and the session model identical, which is what lets opencode apply
-        // the variant.
-        const providerCred: WorkspaceAiCred = lockedModel
-          ? {
-              ...ai,
-              model: OPENCODE_TRADE_MODEL_ID,
-              reasoning: true,
-              reasoningEffort: OPENCODE_TRADE_VARIANT,
-              contextWindow: 1_000_000,
-            }
-          : ai;
-        overlay['provider'] = {
-          [OPENCODE_SESSION_PROVIDER_NAME]: openCodeProvider(providerCred, 'OpenAlice Session provider'),
-        };
-      }
-      // ACP has no --model flag. Its native config selects the default model
-      // for session/new; keep this process-local.
-      if (selectedModel) overlay['model'] = selectedModel;
       env['OPENCODE_CONFIG_CONTENT'] = JSON.stringify(overlay);
       // Do not add a top-level permission override: the terminal's opencode
       // config owns permissions, and the ACP transport already handles
@@ -419,6 +320,7 @@ export const opencodeAdapter: CliAdapter = {
 
   lifecycle: {
     async prepareWorkspace({ cwd }): Promise<void> {
+      await resetLegacyWorkspaceProvider(cwd);
       await syncOpenCodeWorkspaceTheme(cwd);
     },
   },
@@ -572,99 +474,20 @@ export const opencodeAdapter: CliAdapter = {
     return env;
   },
 
-  /** @deprecated Native-project compatibility export; managed Sessions use sessionRuntime. */
-  async writeAiConfig(cwd: string, cred: WorkspaceAiCred): Promise<void> {
-    const hasProvider = !!(cred.baseUrl || cred.apiKey || cred.model);
-    if (!hasProvider) {
-      await resetOwnedJsonConfig({
-        cwd,
-        configPath: OPENCODE_CONFIG_PATH,
-        statePath: OPENCODE_BINDING_STATE_PATH,
-        label: 'opencode project config',
-        legacyOwnedPaths: OPENCODE_OWNED_PATHS,
-      });
-      return;
-    }
-
-    const provider = openCodeProvider(cred, 'OpenAlice workspace provider');
-
-    // Top-level default model is "<provider>/<id>" so opencode resolves the
-    // workspace provider without a UI model picker. The reversible state keeps
-    // any pre-existing provider/model/options and restores them on reset.
-    await writeOwnedJsonConfig({
-      cwd,
-      configPath: OPENCODE_CONFIG_PATH,
-      statePath: OPENCODE_BINDING_STATE_PATH,
-      label: 'opencode project config',
-      entries: [
-        { path: ['$schema'], present: true, value: 'https://opencode.ai/config.json' },
-        { path: ['provider', OPENCODE_PROVIDER_NAME], present: true, value: provider },
-        {
-          path: ['model'],
-          present: !!cred.model,
-          value: cred.model ? `${OPENCODE_PROVIDER_NAME}/${cred.model}` : undefined,
-        },
-      ],
-    });
+  /**
+   * @deprecated OpenAlice opencode is native-only. The shared opencode
+   * config/auth store owns the provider; no Workspace provider file is written.
+   */
+  async writeAiConfig(_cwd: string, _cred: WorkspaceAiCred): Promise<void> {
+    throw new Error('opencode is native-only; Workspace AI provider config is disabled')
   },
 
-  /** @deprecated Compatibility inspection for legacy Session bindings only. */
-  async readAiConfig(cwd: string): Promise<WorkspaceAiCred | null> {
-    const raw = await readWorkspaceFile(cwd, OPENCODE_CONFIG_PATH);
-    if (raw === null) return null;
-    let parsed: Record<string, unknown>;
-    try {
-      parsed = JSON.parse(raw) as Record<string, unknown>;
-    } catch {
-      return null;
-    }
-    const provider = (parsed['provider'] ?? {}) as Record<string, unknown>;
-    const ws = (provider[OPENCODE_PROVIDER_NAME] ?? {}) as Record<string, unknown>;
-    const options = (ws['options'] ?? {}) as Record<string, unknown>;
-    const baseUrl = typeof options['baseURL'] === 'string' ? (options['baseURL'] as string) : null;
-    const headers = (options['headers'] ?? {}) as Record<string, unknown>;
-    const authorization = typeof headers['Authorization'] === 'string'
-      ? headers['Authorization']
-      : typeof headers['authorization'] === 'string'
-        ? headers['authorization']
-        : null;
-    const bearerKey = authorization?.match(/^Bearer\s+(.+)$/i)?.[1] ?? null;
-    const apiKey = typeof options['apiKey'] === 'string' ? (options['apiKey'] as string) : bearerKey;
-    // Top-level model is "<provider>/<id>"; surface just the id back to the modal.
-    let model: string | null = null;
-    const top = parsed['model'];
-    if (typeof top === 'string') {
-      const slash = top.indexOf('/');
-      model = slash >= 0 ? top.slice(slash + 1) : top;
-    }
-    const models = (ws['models'] ?? {}) as Record<string, Record<string, unknown>>;
-    const modelConfig = model ? models[model] : undefined;
-    const limit = (modelConfig?.['limit'] ?? {}) as Record<string, unknown>;
-    const contextWindow = positiveNumber(limit['context'] as number | null | undefined);
-    const reasoning = typeof modelConfig?.['reasoning'] === 'boolean'
-      ? modelConfig['reasoning']
-      : undefined;
-    if (baseUrl === null && apiKey === null && model === null) return null;
-    // Reverse the npm package back to the wire shape.
-    const npm = typeof ws['npm'] === 'string' ? (ws['npm'] as string) : '';
-    const wireShape = npm === '@ai-sdk/anthropic' ? 'anthropic' as const
-      : npm === '@ai-sdk/google' ? 'google-generative-ai' as const
-      : npm === '@ai-sdk/openai' ? 'openai-responses' as const
-      : 'openai-chat' as const;
-    const modelOptions = modelConfig?.['options'];
-    const reasoningEffort = modelOptions && typeof modelOptions === 'object'
-      ? readModelEffort(modelOptions as Record<string, unknown>, wireShape)
-      : undefined;
-    return {
-      baseUrl,
-      apiKey,
-      model,
-      wireShape,
-      ...(wireShape === 'anthropic' ? { authMode: bearerKey ? 'bearer' as const : 'x-api-key' as const } : {}),
-      ...(contextWindow ? { contextWindow } : {}),
-      ...(reasoning !== undefined ? { reasoning } : {}),
-      ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
-    };
+  /**
+   * @deprecated Native-only: never expose a legacy Workspace provider binding.
+   * Existing sessions resolve through `sessionRuntime` and launch natively.
+   */
+  async readAiConfig(_cwd: string): Promise<WorkspaceAiCred | null> {
+    return null
   },
 
   /**

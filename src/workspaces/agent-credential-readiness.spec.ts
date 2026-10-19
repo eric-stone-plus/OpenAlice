@@ -83,6 +83,38 @@ describe('agent credential readiness', () => {
     expect(a.readAiConfig).toHaveBeenCalledOnce();
   });
 
+  it('short-circuits native-only readiness without reading the vault or workspace config', async () => {
+    const a = adapter('opencode', {
+      baseUrl: null,
+      apiKey: 'workspace-key',
+      model: 'deepseek-flash',
+      wireShape: 'openai-chat',
+    });
+    ;(a.capabilities.aiProvider as { nativeOnly?: boolean }).nativeOnly = true;
+
+    const row = await getAgentCredentialReadiness({ meta, agentId: 'opencode', adapter: a });
+    expect(row).toMatchObject({
+      ready: true,
+      requiresCredential: false,
+      source: 'runtime-login',
+      hasWorkspaceConfig: false,
+      hasUsableWorkspaceConfig: false,
+      compatibleCredentialSlugs: [],
+      injectableCredentialSlugs: [],
+    });
+    expect(a.readAiConfig).not.toHaveBeenCalled();
+    expect(readCredentials).not.toHaveBeenCalled();
+
+    const ensured = await ensureAgentCredentialReady({
+      meta,
+      agentId: 'opencode',
+      adapter: a,
+      pickedCredentialSlug: 'openai-1',
+    });
+    expect(ensured.ready).toBe(true);
+    expect(a.writeAiConfig).not.toHaveBeenCalled();
+  });
+
   it('accepts an existing usable workspace config even when the Alice vault is empty', async () => {
     const a = adapter('opencode', {
       baseUrl: null,

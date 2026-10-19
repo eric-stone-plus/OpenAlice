@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Info } from 'lucide-react'
+import { Bot, Info } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { Button } from '@/components/ui/button'
@@ -159,40 +159,57 @@ export function SessionSettingsDialog({
                   ? 'workspace.sessionSettings.aiAccessSection'
                   : 'workspace.sessionSettings.aiSection', { runtime: runtimeName })}
               </div>
-              <fieldset disabled={!aiEditable || saving} className="min-w-0 disabled:opacity-60">
-                <AgentLaunchSelectors
-                  config={config}
-                  onConfigureProvider={() => {
-                    onOpenChange(false)
-                    openOrFocus({ kind: 'settings', params: { category: 'ai-provider' } })
-                  }}
-                  showRuntime={false}
-                  showInference={!opencodeTrade}
-                  menuPlacement="down"
-                  toolbar
-                  layout="settings"
-                />
-              </fieldset>
-              <div className="flex items-start gap-2 rounded-md bg-muted/45 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
-                <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                <span className="min-w-0 flex-1">
-                  {aiEditable
-                    ? t('workspace.sessionSettings.aiPausedHint')
-                    : t('workspace.sessionSettings.pauseRequired')}
-                </span>
-                {!aiEditable && onPause && (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="shrink-0"
-                    onClick={onPause}
-                    disabled={saving}
-                  >
-                    {t('workspace.sessionSettings.pauseAction')}
-                  </Button>
-                )}
-              </div>
+              {opencodeTrade ? (
+                <div className="rounded-lg border border-border bg-muted/25 px-3 py-3">
+                  <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                    <Bot className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                    {t('workspace.sessionSettings.nativeProviderTitle')}
+                  </div>
+                  <div className="mt-1 text-xs text-muted-foreground">
+                    {t('workspace.sessionSettings.nativeProviderDetail')}
+                  </div>
+                  <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+                    {t('workspace.sessionSettings.nativeProviderHelp')}
+                  </p>
+                </div>
+              ) : (
+                <>
+                  <fieldset disabled={!aiEditable || saving} className="min-w-0 disabled:opacity-60">
+                    <AgentLaunchSelectors
+                      config={config}
+                      onConfigureProvider={() => {
+                        onOpenChange(false)
+                        openOrFocus({ kind: 'settings', params: { category: 'ai-provider' } })
+                      }}
+                      showRuntime={false}
+                      showInference
+                      menuPlacement="down"
+                      toolbar
+                      layout="settings"
+                    />
+                  </fieldset>
+                  <div className="flex items-start gap-2 rounded-md bg-muted/45 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
+                    <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                    <span className="min-w-0 flex-1">
+                      {aiEditable
+                        ? t('workspace.sessionSettings.aiPausedHint')
+                        : t('workspace.sessionSettings.pauseRequired')}
+                    </span>
+                    {!aiEditable && onPause && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="shrink-0"
+                        onClick={onPause}
+                        disabled={saving}
+                      >
+                        {t('workspace.sessionSettings.pauseAction')}
+                      </Button>
+                    )}
+                  </div>
+                </>
+              )}
             </div>
           )}
         </div>

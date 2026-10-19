@@ -491,8 +491,8 @@ describe('compatibleCredentials', () => {
     expect(compatibleCredentials(vault, 'agy').map(([s]) => s)).toEqual(['google-1'])
   })
 
-  it('opencode/pi/omp accept every supported wire including native Google', () => {
-    expect(compatibleCredentials(vault, 'opencode').map(([s]) => s)).toEqual(['anthropic-1', 'openai-1', 'custom-1', 'google-1'])
+  it('opencode is native-only; pi/omp accept every supported wire including native Google', () => {
+    expect(compatibleCredentials(vault, 'opencode')).toEqual([])
     expect(compatibleCredentials(vault, 'pi').map(([s]) => s)).toEqual(['anthropic-1', 'openai-1', 'custom-1', 'google-1'])
     expect(compatibleCredentials(vault, 'omp').map(([s]) => s)).toEqual(['anthropic-1', 'openai-1', 'custom-1', 'google-1'])
   })
@@ -507,7 +507,7 @@ describe('compatibleCredentials', () => {
 
   it('preserves input order', () => {
     const ordered: Record<string, Credential> = { z: openaiKey, a: anthropicKey }
-    expect(compatibleCredentials(ordered, 'opencode').map(([s]) => s)).toEqual(['z', 'a'])
+    expect(compatibleCredentials(ordered, 'pi').map(([s]) => s)).toEqual(['z', 'a'])
   })
 })
 

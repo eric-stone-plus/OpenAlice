@@ -84,6 +84,18 @@ function maybeHandleOnboardingMockCredentialTest(body: {
 }
 
 /** Config routes: GET /, PUT /:section, profile CRUD, presets, test */
+function redactProviderCredentials(provider: unknown): unknown {
+  if (!provider || typeof provider !== 'object' || Array.isArray(provider)) return provider
+  const { apiKey, apiSecret, password, secretKey, ...rest } = provider as Record<string, unknown>
+  return {
+    ...rest,
+    ...(apiKey ? { hasApiKey: true } : {}),
+    ...(apiSecret ? { hasApiSecret: true } : {}),
+    ...(password ? { hasPassword: true } : {}),
+    ...(secretKey ? { hasSecretKey: true } : {}),
+  }
+}
+
 export function createConfigRoutes(opts?: ConfigRouteOpts) {
   const app = new Hono()
   const adapters = opts?.adapterRegistry ?? createBuiltinAdapterRegistry()
@@ -99,7 +111,26 @@ export function createConfigRoutes(opts?: ConfigRouteOpts) {
   app.get('/', async (c) => {
     try {
       const config = await loadConfig()
-      return c.json(config)
+      // Never ship credential material in the general config payload. The
+      // desktop build is native-only; the AI-provider page is a read-only
+      // native status surface and does not need the vault. Legacy broker
+      // credentials are redacted too; market-data provider keys remain because
+      // the Market Data editor uses them directly.
+      const aiProvider = {
+        ...config.aiProvider,
+        apiKeys: {},
+        credentials: {},
+        workspaceCredentialDefaults: {},
+      }
+      const crypto = {
+        ...config.crypto,
+        provider: redactProviderCredentials(config.crypto.provider),
+      }
+      const securities = {
+        ...config.securities,
+        provider: redactProviderCredentials(config.securities.provider),
+      }
+      return c.json({ ...config, aiProvider, crypto, securities })
     } catch (err) {
       return c.json({ error: String(err) }, 500)
     }
@@ -120,10 +151,10 @@ export function createConfigRoutes(opts?: ConfigRouteOpts) {
   // provider stack.
 
   /**
-   * GET /credentials — list central credentials. Returns the apiKey so the edit
-   * form can round-trip it (same exposure as /api/workspaces/credentials and the
-   * legacy agent-profiles route; all behind the admin-token gate). `hasApiKey`
-   * kept for callers that only need presence.
+   * GET /credentials — list central credentials. Raw key material is never
+   * returned: the desktop build is native-only and has no credential editor.
+   * `PUT /credentials/:slug` still supports the empty-key convention for API
+   * callers that keep an existing secret.
    */
   app.get('/credentials', async (c) => {
     try {
@@ -135,7 +166,7 @@ export function createConfigRoutes(opts?: ConfigRouteOpts) {
         authType: cred.authType,
         wires: credentialWires(cred), // derives from legacy {baseUrl,wireShape} too
         ...(cred.baseUrl ? { baseUrl: cred.baseUrl } : {}),
-        apiKey: cred.apiKey ?? null,
+        apiKey: null,
         hasApiKey: !!cred.apiKey,
         ...(cred.lastModel ? { lastModel: cred.lastModel } : {}),
       }))
@@ -146,11 +177,14 @@ export function createConfigRoutes(opts?: ConfigRouteOpts) {
   })
 
   app.on(['GET', 'POST'], '/credentials/:slug/models', async (c) => {
-    const credential = (await readCredentials())[c.req.param('slug')]
-    if (!credential) return c.json({ error: 'Credential not found' }, 404)
     const agent = c.req.query('agent')
     const capabilities = agent ? adapters.get(agent)?.capabilities.aiProvider : undefined
     if (agent && !capabilities) return c.json({ error: 'Unknown AI runtime' }, 400)
+    if (agent && capabilities?.nativeOnly) {
+      return c.json({ error: 'native_only', message: `${agent} uses its native provider` }, 400)
+    }
+    const credential = (await readCredentials())[c.req.param('slug')]
+    if (!credential) return c.json({ error: 'Credential not found' }, 404)
     const wires = credentialWires(credential)
     const requestedShape = c.req.query('wireShape')
     if (requestedShape && !credentialWireShapeEnum.safeParse(requestedShape).success) return c.json({ error: 'Unknown wire shape' }, 400)

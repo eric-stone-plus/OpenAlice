@@ -146,15 +146,22 @@ export function usePinnedRuntimeDraft({
   initial,
   active = true,
 }: UsePinnedRuntimeDraftOptions): PinnedRuntimeDraft {
-  const initialKey = JSON.stringify(initial)
-  const [draft, setDraft] = useState(initial)
+  const nativeOnly = agents.find((candidate) => candidate.id === agent)?.capabilities.aiProvider?.nativeOnly === true
+  const normalizedInitial = useMemo<QuickChatLaunchPreference>(
+    () => nativeOnly
+      ? { agent, accessMode: 'native', credentialSlug: null, model: null, reasoningEffort: null }
+      : initial,
+    [agent, initial, nativeOnly],
+  )
+  const initialKey = JSON.stringify(normalizedInitial)
+  const [draft, setDraft] = useState(normalizedInitial)
 
   useEffect(() => {
     if (!active) return
-    setDraft(initial)
+    setDraft(normalizedInitial)
     // Persist identity is the serialized launch, not object identity.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active, initialKey])
+  }, [active, initialKey, nativeOnly])
 
   const rememberLaunch = useCallback(async (launch: QuickChatLaunchPreference) => {
     setDraft({
@@ -184,8 +191,10 @@ export function usePinnedRuntimeDraft({
   })
 
   const toRuntimeUpdate = useCallback(
-    () => pinnedLaunchToRuntimeUpdate(draft),
-    [draft],
+    () => nativeOnly
+      ? { credentialSource: 'native' as const, model: null, reasoningEffort: null }
+      : pinnedLaunchToRuntimeUpdate(draft),
+    [draft, nativeOnly],
   )
 
   const capability = useCallback((fallback: PinnedRuntimeCapability) => (
@@ -199,8 +208,8 @@ export function usePinnedRuntimeDraft({
   return {
     config,
     draft,
-    initial,
-    dirty: !pinnedLaunchEquals(draft, initial),
+    initial: normalizedInitial,
+    dirty: !pinnedLaunchEquals(draft, normalizedInitial),
     toRuntimeUpdate,
     capability,
     formatCapability,

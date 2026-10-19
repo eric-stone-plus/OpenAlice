@@ -1433,6 +1433,7 @@ export async function createWorkspaceService(opts: CreateWorkspaceServiceOptions
         'interactive',
         adapter.id,
         undefined,
+        adapter.capabilities.aiProvider?.nativeOnly,
       ),
     });
     const effectiveSource: AgentRuntimeReadinessSource =
@@ -1681,6 +1682,7 @@ export async function createWorkspaceService(opts: CreateWorkspaceServiceOptions
               'headless',
               adapter.id,
               undefined,
+              adapter.capabilities.aiProvider?.nativeOnly,
             ),
           })
         : undefined;
@@ -1761,6 +1763,7 @@ export async function createWorkspaceService(opts: CreateWorkspaceServiceOptions
             'headless',
             adapter.id,
             opts.selection,
+            adapter.capabilities.aiProvider?.nativeOnly,
           ),
         });
         rememberRuntime = true;
@@ -1951,7 +1954,10 @@ export async function createWorkspaceService(opts: CreateWorkspaceServiceOptions
         const previous = identity.runtimeBinding ?? createNativeSessionRuntimeBinding({ adapter }).binding;
         if (conversation && selection && Object.values(selection).some(value => value !== undefined)) {
           sessionRuntime = await createSessionRuntimeBinding({
-            adapter, cwd: ws.dir, selection: mergeSessionRuntimeSelection(previous, selection),
+            adapter, cwd: ws.dir,
+            selection: adapter.capabilities.aiProvider?.nativeOnly
+              ? { credentialSource: 'native' }
+              : mergeSessionRuntimeSelection(previous, selection),
           });
           await resumeRegistry.replaceRuntimeBinding({
             resumeId, wsId: ws.id, agent: adapter.id, runtimeBinding: sessionRuntime.binding,
@@ -1979,6 +1985,7 @@ export async function createWorkspaceService(opts: CreateWorkspaceServiceOptions
           'headless',
           adapter.id,
           selection,
+          adapter.capabilities.aiProvider?.nativeOnly,
         ),
       });
     }

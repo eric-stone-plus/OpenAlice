@@ -309,6 +309,7 @@ describe('WorkspaceManagerPage runtime selection', () => {
         aiProvider: {
           ...openCode.capabilities.aiProvider!,
           credentialSource: 'runtime-or-workspace',
+          nativeOnly: true,
         },
       },
     }
@@ -347,7 +348,7 @@ describe('WorkspaceManagerPage runtime selection', () => {
       undefined,
       undefined,
       undefined,
-      undefined,
+      'native',
     ))
     expect(mocks.probeAgentRuntimeReadiness).not.toHaveBeenCalled()
   })
@@ -376,6 +377,7 @@ describe('WorkspaceManagerPage runtime selection', () => {
         aiProvider: {
           ...openCode.capabilities.aiProvider!,
           credentialSource: 'runtime-or-workspace',
+          nativeOnly: true,
         },
       },
     }
@@ -387,9 +389,8 @@ describe('WorkspaceManagerPage runtime selection', () => {
 
     const picker = await screen.findByRole('button', { name: 'Select agent' })
     expect(picker.textContent).toContain('OpenCode')
-    expect(screen.getByText('OpenCode chooses the model, reasoning, and context limits')).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: 'Configure workspace AI' }))
-    expect(mocks.openAgentConfig).toHaveBeenCalledWith('workspace-manager', 'opencode', 'ai')
+    expect(screen.queryByRole('button', { name: 'Configure workspace AI' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Adjust workspace AI' })).toBeNull()
     fireEvent.click(picker)
 
     expect(screen.getByRole('menuitem', { name: /OpenCode/ })).toBeTruthy()
@@ -408,7 +409,7 @@ describe('WorkspaceManagerPage runtime selection', () => {
       undefined,
       undefined,
       undefined,
-      undefined,
+      'native',
     ))
     expect(mocks.setDefaultAgent).not.toHaveBeenCalled()
     expect(mocks.openOrFocus).toHaveBeenCalledWith({
@@ -446,7 +447,7 @@ describe('WorkspaceManagerPage runtime selection', () => {
     expect(mocks.getAgentReadiness).toHaveBeenCalledWith('workspace-manager')
 
     fireEvent.click(screen.getByRole('button', { name: 'Adjust workspace AI' }))
-    expect(mocks.openAgentConfig).toHaveBeenCalledWith('workspace-manager', 'opencode', 'ai')
+    expect(mocks.openAgentConfig).toHaveBeenCalledWith('workspace-manager', 'opencode', 'launch')
   })
 
   it('names opencode in the native first-run trust gate', async () => {
@@ -557,7 +558,7 @@ describe('WorkspaceManagerPage runtime selection', () => {
     expect(geminiModel.title).toBe('256K context')
     expect(screen.queryByText('Agent runtime')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Adjust workspace AI' }))
-    expect(mocks.openAgentConfig).toHaveBeenCalledWith('workspace-manager', 'opencode', 'ai')
+    expect(mocks.openAgentConfig).toHaveBeenCalledWith('workspace-manager', 'opencode', 'launch')
 
     fireEvent.click(screen.getByRole('button', { name: 'AI Provider' }))
     fireEvent.click(screen.getByRole('menuitem', { name: /DeepSeek/ }))

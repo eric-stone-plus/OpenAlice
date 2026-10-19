@@ -121,11 +121,14 @@ describe('SessionSettingsDialog', () => {
     expect(onSaveRuntime).not.toHaveBeenCalled()
   })
 
-  it('hides the model and effort editors for an opencode Trade session', () => {
+  it('shows the native provider note for an opencode Trade session', () => {
     render(<SessionSettingsDialog open onOpenChange={vi.fn()} record={record({ agent: 'opencode' })} agents={[]}
       workspaceId="workspace-1" onSaveDisplayName={vi.fn()} onSaveRuntime={vi.fn()} />)
     expect(screen.queryByText('AI selectors')).toBeNull()
-    expect(screen.getByText('AI access only')).toBeTruthy()
+    expect(screen.queryByText('AI access only')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Add API account' })).toBeNull()
+    expect(screen.getByText('DeepSeek via opencode')).toBeTruthy()
+    expect(screen.getByText('deepseek/deepseek-flash · effort max')).toBeTruthy()
   })
 
   it('saves the selected credential, model, and effort without resuming', async () => {

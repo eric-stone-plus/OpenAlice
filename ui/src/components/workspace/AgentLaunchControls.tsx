@@ -654,7 +654,7 @@ export const AgentLaunchSelectors = forwardRef<AgentLaunchSelectorsHandle, Agent
         </DropdownMenu>
       )}
 
-      {showAi && showInference && config.selectedAgent && (
+      {showAi && showInference && config.selectedAgent && !config.nativeOnly && (
         <div
           data-testid="agent-launch-inference-group"
           className={settingsLayout ? 'w-full min-w-0' : `contents sm:flex sm:shrink-0 sm:items-center ${toolbar ? 'sm:gap-1' : 'sm:gap-2'}`}
@@ -736,7 +736,7 @@ export function AgentLaunchDetails({
     scope = {
       label: t('chatLanding.runtimeAiScope', { runtime: config.selectedAgent.displayName }),
       detail: t('chatLanding.runtimeManagedAi', { runtime: config.selectedAgent.displayName }),
-      ...(!config.needsCredential && hasWorkspaceTarget && onAdjustAi
+      ...(!config.nativeOnly && !config.needsCredential && hasWorkspaceTarget && onAdjustAi
         ? { actionLabel: t('chatLanding.configureWorkspaceAi') }
         : {}),
     }

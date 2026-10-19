@@ -569,6 +569,8 @@ export function agentSupportsWeb(agents: readonly AgentInfo[] | undefined, agent
 
 export interface AgentProviderCapabilities {
   readonly credentialSource: 'runtime-or-workspace' | 'workspace-required';
+  /** The runtime owns provider selection; OpenAlice offers no vault/provider UI. */
+  readonly nativeOnly?: boolean;
   readonly wirePreference: readonly WireShape[];
   readonly directVendors?: readonly string[];
   readonly defaultWire?: WireShape;

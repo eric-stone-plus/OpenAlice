@@ -36,13 +36,25 @@ export function registerConnectorModelRoutes(app: Hono, service: () => Workspace
       if ((request.resumeId && request.resumeId !== resumeId) || (request.revision && request.revision !== revision)) {
         throw new Error('Session or configuration changed. Reopen /model before saving.')
       }
-      const vault = await readCredentials()
-      const credentials = compatibleCredentials(vault, adapter).map(([slug, cred]) => ({ id: `vault:${slug}`, label: cred.label || slug }))
-      if (adapter.capabilities.aiProvider.credentialSource === 'runtime-or-workspace') credentials.unshift({ id: 'native', label: 'Runtime login' })
-      const selected = request.selection ?? {
-        credential: binding.credential.source === 'vault' ? `vault:${binding.credential.credentialSlug}` : binding.credential.source,
-        model: binding.model ?? null, effort: binding.reasoningEffort ?? null,
+      const nativeOnly = adapter.capabilities.aiProvider.nativeOnly === true
+      if (nativeOnly && request.selection && (
+        request.selection.credential !== 'native' ||
+        request.selection.model != null ||
+        request.selection.effort != null
+      )) {
+        throw new Error('This runtime uses its native provider; vault credentials and model/effort overrides are not supported.')
       }
+      const vault = nativeOnly ? {} : await readCredentials()
+      const credentials = nativeOnly
+        ? [{ id: 'native', label: 'Runtime login' }]
+        : compatibleCredentials(vault, adapter).map(([slug, cred]) => ({ id: `vault:${slug}`, label: cred.label || slug }))
+      if (!nativeOnly && adapter.capabilities.aiProvider.credentialSource === 'runtime-or-workspace') credentials.unshift({ id: 'native', label: 'Runtime login' })
+      const selected = nativeOnly
+        ? { credential: 'native', model: null, effort: null }
+        : request.selection ?? {
+            credential: binding.credential.source === 'vault' ? `vault:${binding.credential.credentialSlug}` : binding.credential.source,
+            model: binding.model ?? null, effort: binding.reasoningEffort ?? null,
+          }
       if (request.selection && !credentials.some(row => row.id === selected.credential)) throw new Error('Select a compatible credential in OpenAlice first.')
       const catalog = runtimeModelOptions({ agent: identity.agent,
         credential: selected.credential === 'native' ? null : vault[selected.credential.slice(6)] ?? null,
@@ -53,7 +65,11 @@ export function registerConnectorModelRoutes(app: Hono, service: () => Workspace
       // Like Chat, custom/provider-private model IDs remain supported. Runtime owns availability.
       if (selected.model && !models.some(m => m.id === selected.model)) models.unshift({ id: selected.model, label: selected.model })
       const semantics = runtimeModelSemantics(selected.model, catalog)
-      const efforts = [...runtimeEffortOptions({ agent: identity.agent, semantics, modelKnown: semantics !== null, model: selected.model })]
+      // Native-only runtimes pin the model and effort in the adapter; offering
+      // choices here would be discarded on apply.
+      const efforts = nativeOnly
+        ? []
+        : [...runtimeEffortOptions({ agent: identity.agent, semantics, modelKnown: semantics !== null, model: selected.model })]
       if (request.selection && selected.effort && !efforts.includes(selected.effort as typeof efforts[number])) throw new Error('That effort is not supported by the selected model.')
       const task = svc.headlessTasks?.latestForResumeId(resumeId)
       const panel: ConnectorModelPanel = { resumeId, revision, runtime: identity.agent, selection: selected, credentials, models, efforts, running: task?.status === 'running', saved: false }
@@ -79,7 +95,7 @@ export function registerConnectorModelRoutes(app: Hono, service: () => Workspace
       if (savedSelection.model && !models.some(m => m.id === savedSelection.model)) models.unshift({ id: savedSelection.model, label: savedSelection.model })
       const savedSemantics = runtimeModelSemantics(savedSelection.model, catalog)
       return c.json({ ...panel, saved: true, revision: revisionOf(resolved.binding), selection: savedSelection,
-        efforts: [...runtimeEffortOptions({ agent: identity.agent, semantics: savedSemantics, modelKnown: savedSemantics !== null, model: savedSelection.model })],
+        efforts: nativeOnly ? [] : [...runtimeEffortOptions({ agent: identity.agent, semantics: savedSemantics, modelKnown: savedSemantics !== null, model: savedSelection.model })],
       })
     } catch (error) {
       return c.json({ error: error instanceof Error ? error.message : 'Unable to update model settings' }, 400)

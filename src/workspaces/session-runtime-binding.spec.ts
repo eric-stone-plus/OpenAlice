@@ -251,6 +251,58 @@ describe('durable Session runtime binding', () => {
   })
 })
 
+describe('native-only adapters', () => {
+  it('opencode ignores a vault/workspace selection on create', async () => {
+    await expect(createSessionRuntimeBinding({
+      adapter: opencodeAdapter,
+      cwd: '/workspace',
+      selection: {
+        credentialSlug: 'openai-1',
+        model: 'native-model-override',
+        reasoningEffort: 'high',
+      },
+      credentials: { 'openai-1': openai },
+    })).resolves.toEqual({
+      binding: { version: 1, credential: { source: 'native' } },
+      ai: null,
+    })
+  })
+
+  it('opencode preserves a stale persisted binding on resolve without reading provider files', async () => {
+    const binding = {
+      version: 1,
+      credential: { source: 'workspace', fingerprint: 'legacy-fingerprint' },
+      model: 'legacy-model',
+      reasoningEffort: 'high',
+    } as const
+    await expect(resolveSessionRuntimeBinding({
+      adapter: opencodeAdapter,
+      cwd: '/workspace',
+      binding,
+      credentials: {},
+    })).resolves.toEqual({ binding, ai: null })
+  })
+
+  it('opencode drops model/effort overrides in favor of the native Trade profile', () => {
+    const native = createNativeSessionRuntimeBinding({
+      adapter: opencodeAdapter,
+      selection: { model: 'native-model-override', reasoningEffort: 'medium' },
+    })
+    expect(native.binding).toEqual({ version: 1, credential: { source: 'native' } })
+    const projected = opencodeAdapter.sessionRuntime!.project(
+      { cwd: '/workspace', env: {} },
+      native,
+    )
+    expect(projected.interactiveArgs).toEqual(['--model', 'deepseek/deepseek-flash'])
+    expect(projected.headlessArgs).toEqual([
+      '--model', 'deepseek/deepseek-flash',
+      '--variant', 'max',
+      '--agent', 'trade',
+    ])
+    expect(JSON.stringify(projected.env)).not.toContain('native-model-override')
+  })
+})
+
 describe('built-in Agent Session runtime projection', () => {
   const runtime: ResolvedSessionRuntimeBinding = {
     binding: {
@@ -278,7 +330,7 @@ describe('built-in Agent Session runtime projection', () => {
     env: { AQ_LAUNCHER_REPO_ROOT: '/openalice' },
   }
 
-  it.each([claudeAdapter, codexAdapter, cursorAdapter, agyAdapter, grokAdapter, ompAdapter, opencodeAdapter, piAdapter])(
+  it.each([claudeAdapter, codexAdapter, cursorAdapter, agyAdapter, grokAdapter, ompAdapter, piAdapter])(
     '$id implements a secret-free argv projection',
     (adapter) => {
       const projected = adapter.sessionRuntime!.project(ctx, runtime)
@@ -305,7 +357,7 @@ describe('built-in Agent Session runtime projection', () => {
     },
   )
 
-  it.each([claudeAdapter, codexAdapter, cursorAdapter, agyAdapter, grokAdapter, ompAdapter, opencodeAdapter, piAdapter])(
+  it.each([claudeAdapter, codexAdapter, cursorAdapter, agyAdapter, grokAdapter, ompAdapter, piAdapter])(
     '$id accepts a credentialless native binding and still projects model/effort',
     (adapter) => {
       const native = createNativeSessionRuntimeBinding({
@@ -354,7 +406,6 @@ describe('built-in Agent Session runtime projection', () => {
   it.each([
     [claudeAdapter, '--effort'],
     [codexAdapter, 'model_reasoning_effort'],
-    [opencodeAdapter, '--variant'],
     [ompAdapter, '--thinking'],
     [piAdapter, '--thinking'],
   ] as const)(

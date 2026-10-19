@@ -350,14 +350,8 @@ describe('GET /credentials — Quick Chat launch metadata', () => {
     const result = await get(app, '/credentials?agent=opencode');
 
     expect(result.status).toBe(200);
-    expect(result.body.credentials).toEqual([
-      expect.objectContaining({
-        slug: 'google-1',
-        resolvedModel: 'gemini-3.8-flash',
-        resolvedReasoning: true,
-        resolvedReasoningMode: 'adaptive',
-      }),
-    ]);
+    // opencode is native-only: the vault is never offered as a launch source.
+    expect(result.body.credentials).toEqual([]);
   });
 
   it('returns the target workspace model, context, and protocol for the selected credential', async () => {
@@ -382,18 +376,17 @@ describe('GET /credentials — Quick Chat launch metadata', () => {
     const result = await get(app, '/ws-1/agent-config/opencode/credential');
 
     expect(result.status).toBe(200);
+    // Native-only opencode ignores a legacy Workspace provider file.
     expect(result.body).toEqual({
-      configured: true,
-      slug: 'google-1',
-      model: 'gemini-3.5-flash',
-      contextWindow: 512_000,
-      wireShape: 'google-generative-ai',
-      reasoningMode: 'adaptive',
-      reasoningEffort: 'medium',
+      configured: false,
+      slug: null,
+      model: null,
+      contextWindow: null,
+      wireShape: null,
     });
   });
 
-  it('reports a registered thinking-switch default when the model has no effort tier', async () => {
+  it('reports no Workspace credential for a native-only runtime', async () => {
     vi.mocked(readCredentials).mockResolvedValue({
       'longcat-1': {
         vendor: 'longcat',
@@ -416,19 +409,16 @@ describe('GET /credentials — Quick Chat launch metadata', () => {
     expect(result).toEqual({
       status: 200,
       body: {
-        configured: true,
-        slug: 'longcat-1',
-        model: 'LongCat-2.0',
+        configured: false,
+        slug: null,
+        model: null,
         contextWindow: null,
-        wireShape: 'openai-chat',
-        reasoning: true,
-        reasoningMode: 'optional',
-        reasoningDefaultEnabled: true,
+        wireShape: null,
       },
     });
   });
 
-  it('keeps hand-edited Workspace config visible when no vault key matches', async () => {
+  it('does not expose a hand-edited Workspace config for a native-only runtime', async () => {
     vi.mocked(readCredentials).mockResolvedValue({});
     const { app } = build({
       opencodeConfig: {
@@ -444,11 +434,11 @@ describe('GET /credentials — Quick Chat launch metadata', () => {
     expect(result).toEqual({
       status: 200,
       body: {
-        configured: true,
+        configured: false,
         slug: null,
-        model: 'local-manual-model',
-        contextWindow: 128_000,
-        wireShape: 'openai-chat',
+        model: null,
+        contextWindow: null,
+        wireShape: null,
       },
     });
   });
@@ -518,24 +508,23 @@ describe('GET /credentials — Quick Chat launch metadata', () => {
     expect(credential).toEqual({
       status: 200,
       body: {
-        configured: true,
-        slug: 'google-1',
-        model: 'gemini-3.5-flash',
-        contextWindow: 512_000,
-        wireShape: 'google-generative-ai',
-        reasoningMode: 'adaptive',
+        configured: false,
+        slug: null,
+        model: null,
+        contextWindow: null,
+        wireShape: null,
       },
     });
     expect(readiness.status).toBe(200);
     expect(readiness.body.agents.opencode).toMatchObject({
       agent: 'opencode',
       ready: true,
-      source: 'workspace-config',
-      detectedCredentialSlug: 'google-1',
+      source: 'runtime-login',
+      detectedCredentialSlug: null,
     });
   });
 
-  it('writes AI adjustments to the reserved Manager runtime workspace', async () => {
+  it('rejects AI adjustments for the native-only reserved Manager runtime workspace', async () => {
     vi.mocked(readCredentials).mockResolvedValue({});
     const { app, opencode } = build({
       runtimeWorkspace: {
@@ -559,11 +548,9 @@ describe('GET /credentials — Quick Chat launch metadata', () => {
       body: JSON.stringify(config),
     });
 
-    expect(response.status).toBe(200);
-    expect(opencode.writeAiConfig).toHaveBeenCalledWith('/manager', {
-      ...config,
-      reasoning: true,
-    });
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ error: 'native_only' });
+    expect(opencode.writeAiConfig).not.toHaveBeenCalled();
   });
 });
 
@@ -651,11 +638,10 @@ describe('POST /quick-chat — native auth and explicit credential overrides', (
         agentId: 'opencode',
         sessionRuntime: {
           binding: {
-            credential: { source: 'vault', credentialSlug: 'openai-2' },
-            model: 'remembered-model',
-            reasoningEffort: 'medium',
+            version: 1,
+            credential: { source: 'native' },
           },
-          ai: { apiKey: 'sk-second' },
+          ai: null,
         },
       });
 
@@ -669,10 +655,7 @@ describe('POST /quick-chat — native auth and explicit credential overrides', (
                 agent: 'opencode',
                 agents: {
                   opencode: {
-                    accessMode: 'vault',
-                    credentialSlug: 'openai-2',
-                    model: 'remembered-model',
-                    reasoningEffort: 'medium',
+                    accessMode: 'native',
                   },
                 },
               },
@@ -708,9 +691,8 @@ describe('POST /quick-chat — native auth and explicit credential overrides', (
       binding: {
         version: 1,
         credential: { source: 'native' },
-        model: 'native-model',
       },
-      ai: { model: 'native-model', reasoningEffort: null },
+      ai: null,
     });
   });
 
@@ -724,11 +706,10 @@ describe('POST /quick-chat — native auth and explicit credential overrides', (
     expect(launch.status, JSON.stringify(launch.body)).toBe(201);
     expect(opencode.writeAiConfig).not.toHaveBeenCalled();
     const runtime = (spawn.mock.calls[0] as any[])[1].sessionRuntime;
-    expect(runtime.binding).toMatchObject({
-      credential: { source: 'vault', credentialSlug: 'openai-2' },
-      model: 'gpt-5.5-mini',
+    expect(runtime).toEqual({
+      binding: { version: 1, credential: { source: 'native' } },
+      ai: null,
     });
-    expect(runtime.ai.apiKey).toBe('sk-second');
   });
 
   it('upgrades a legacy resumed Session to native ownership without reading current Workspace credentials', async () => {
@@ -778,12 +759,9 @@ describe('POST /quick-chat — native auth and explicit credential overrides', (
 
     expect(r.status, JSON.stringify(r.body)).toBe(201);
     expect(opencode.writeAiConfig).not.toHaveBeenCalled();
-    expect((spawn.mock.calls[0] as any[])[1].sessionRuntime).toMatchObject({
-      binding: {
-        credential: { source: 'vault', credentialSlug: 'openai-2' },
-        model: 'gpt-5.5-mini',
-      },
-      ai: { apiKey: 'sk-second' },
+    expect((spawn.mock.calls[0] as any[])[1].sessionRuntime).toEqual({
+      binding: { version: 1, credential: { source: 'native' } },
+      ai: null,
     });
     expect(spawn).toHaveBeenCalledOnce();
   });

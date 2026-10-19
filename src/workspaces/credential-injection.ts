@@ -91,6 +91,8 @@ export function compatibleCredentials(
 ): Array<[string, Credential]> {
   const capabilities = adapter.capabilities.aiProvider
   if (!capabilities) return []
+  // Native-only runtimes own their provider; never offer vault credentials.
+  if (capabilities.nativeOnly) return []
   return Object.entries(credentials).filter(
     ([, cred]) => capabilities.directVendors?.includes(cred.vendor)
       || pickAgentWire(credentialWires(cred), capabilities, undefined, cred.vendor) !== null,

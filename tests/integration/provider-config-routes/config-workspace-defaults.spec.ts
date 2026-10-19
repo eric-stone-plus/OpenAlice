@@ -116,6 +116,16 @@ describe('generic config sections', () => {
     expect(fetcher).toHaveBeenCalledTimes(1)
   })
 
+  it('rejects native-only runtimes before probing a vault credential', async () => {
+    const fetcher = vi.fn()
+    vi.stubGlobal('fetch', fetcher)
+    const routes = createConfigRoutes()
+    const response = await req(routes, 'GET', '/credentials/openai-1/models?agent=opencode')
+    expect(response.status).toBe(400)
+    expect(response.body).toMatchObject({ error: 'native_only' })
+    expect(fetcher).not.toHaveBeenCalled()
+  })
+
   it('uses provider defaults for unsupported saved and draft discovery without network requests', async () => {
     const fetcher = vi.fn()
     vi.stubGlobal('fetch', fetcher)
@@ -171,8 +181,10 @@ describe('GET /workspace-credential-defaults', () => {
     expect(compat.claude).toEqual(['anthropic-1'])
     // codex is Responses-only → only the openai key qualifies (chat-only excluded).
     expect(compat.codex).toEqual(['openai-1'])
-    // opencode/pi speak chat|anthropic|responses → every key qualifies.
-    expect(new Set(compat.opencode)).toEqual(new Set(['anthropic-1', 'openai-1', 'chat-1']))
+    // opencode is native-only: it owns its provider and never offers vault keys.
+    expect(compat.opencode).toEqual([])
+    // omp/pi speak chat|anthropic|responses → every key qualifies.
+    expect(new Set(compat.omp)).toEqual(new Set(['anthropic-1', 'openai-1', 'chat-1']))
     expect(new Set(compat.pi)).toEqual(new Set(['anthropic-1', 'openai-1', 'chat-1']))
     // Cursor consumes its own provider credential directly, without claiming
     // that the Dashboard key speaks an OpenAI-compatible protocol.
@@ -357,13 +369,13 @@ describe('PUT /workspace-credential-defaults', () => {
     const routes = createConfigRoutes()
     const { status, body } = await req(routes, 'PUT', '/workspace-credential-defaults', {
       defaults: {
-        opencode: { credentialSlug: 'openai-1', model: 'gpt-5.5', wireShape: 'openai-responses', contextWindow: 512_000, reasoning: false },
+        omp: { credentialSlug: 'openai-1', model: 'gpt-5.5', wireShape: 'openai-responses', contextWindow: 512_000, reasoning: false },
         pi: { credentialSlug: 'anthropic-1', reasoning: true },
       },
     })
     expect(status).toBe(200)
     expect(body!.defaults).toEqual({
-      opencode: { credentialSlug: 'openai-1', model: 'gpt-5.5', wireShape: 'openai-responses', contextWindow: 512_000 },
+      omp: { credentialSlug: 'openai-1', model: 'gpt-5.5', wireShape: 'openai-responses', contextWindow: 512_000 },
       pi: { credentialSlug: 'anthropic-1' },
     })
     expect(defaultsStore).toEqual(body!.defaults)
@@ -373,13 +385,13 @@ describe('PUT /workspace-credential-defaults', () => {
     const routes = createConfigRoutes()
     const { status, body } = await req(routes, 'PUT', '/workspace-credential-defaults', {
       defaults: {
-        opencode: { credentialSlug: 'chat-1', model: 'private-model', reasoning: false },
+        omp: { credentialSlug: 'chat-1', model: 'private-model', reasoning: false },
       },
     })
 
     expect(status).toBe(200)
     expect(body!.defaults).toEqual({
-      opencode: {
+      omp: {
         credentialSlug: 'chat-1',
         model: 'private-model',
         reasoning: false,
@@ -391,9 +403,9 @@ describe('PUT /workspace-credential-defaults', () => {
   it('drops an agent whose credentialSlug is empty ("don\'t seed")', async () => {
     const routes = createConfigRoutes()
     const { body } = await req(routes, 'PUT', '/workspace-credential-defaults', {
-      defaults: { opencode: { credentialSlug: 'openai-1' }, pi: { credentialSlug: '' } },
+      defaults: { omp: { credentialSlug: 'openai-1' }, pi: { credentialSlug: '' } },
     })
-    expect(body!.defaults).toEqual({ opencode: { credentialSlug: 'openai-1' } })
+    expect(body!.defaults).toEqual({ omp: { credentialSlug: 'openai-1' } })
   })
 
   it('persists a runtime-direct provider default without inventing a wire shape', async () => {
@@ -417,6 +429,17 @@ describe('PUT /workspace-credential-defaults', () => {
     expect(defaultsStore).toEqual({})
   })
 
+  it('rejects any vault default for the native-only opencode runtime', async () => {
+    const routes = createConfigRoutes()
+    const { status, body } = await req(routes, 'PUT', '/workspace-credential-defaults', {
+      defaults: { opencode: { credentialSlug: 'openai-1' } },
+    })
+
+    expect(status).toBe(400)
+    expect(body!.error).toContain('opencode cannot use openai-1')
+    expect(defaultsStore).toEqual({})
+  })
+
   it('rejects an explicit protocol the selected credential or agent cannot speak', async () => {
     const routes = createConfigRoutes()
     const { status, body } = await req(routes, 'PUT', '/workspace-credential-defaults', {
@@ -430,7 +453,7 @@ describe('PUT /workspace-credential-defaults', () => {
   it('validates context before writing either default', async () => {
     const routes = createConfigRoutes()
     const { status } = await req(routes, 'PUT', '/workspace-credential-defaults', {
-      defaults: { opencode: { credentialSlug: 'openai-1', contextWindow: -1 } },
+      defaults: { omp: { credentialSlug: 'openai-1', contextWindow: -1 } },
     })
     expect(status).toBe(400)
     expect(defaultsStore).toEqual({})
