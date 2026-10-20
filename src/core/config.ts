@@ -160,7 +160,11 @@ async function readGlobalProviderKeys(strict = false): Promise<Record<string, st
 /** Fill providerKeys gaps from the user-global file (local wins per key). */
 async function applyGlobalProviderKeys<T extends { providerKeys: object }>(parsed: T): Promise<T> {
   const keys = parsed.providerKeys as Record<string, string | undefined>
-  const global = await readGlobalProviderKeys()
+  // Do not use the quarantining reader on boot: it would rename an unsealable
+  // global store aside, and a later save would then write a fresh file over the
+  // original path. The strict reader throws without moving the file; a corrupt
+  // store is ignored for this read and the save path still refuses to replace it.
+  const global = await readGlobalProviderKeys(true).catch(() => ({}))
   for (const [k, v] of Object.entries(global)) {
     // An explicit empty string is a tombstone that blocks a stale global key
     // from resurrecting after a failed mirror write.
@@ -1217,7 +1221,7 @@ function explicitProviderKeys(data: unknown): Record<string, string> {
   const keys = data['providerKeys']
   if (isPlainObject(keys)) {
     for (const [key, value] of Object.entries(keys)) {
-      if (typeof value === 'string') out[key] = value.trim() === '' ? '' : value
+      if (typeof value === 'string') out[key] = value
     }
   }
   const clears = data['clearProviderKeys']
@@ -1248,8 +1252,11 @@ function mergeMarketDataInput(existing: Record<string, unknown>, incoming: unkno
       // absent keys are preserved so a redacted GET→PUT echo cannot wipe the
       // whole map.
       if (typeof value !== 'string') continue
-      if (value.trim() === '') merged[key] = ''
-      else merged[key] = value
+      // Only an exactly-empty value is the explicit clear signal. A
+      // whitespace-only value from a stray space in the settings field is a
+      // no-op in both stores, not a silent credential wipe.
+      if (value === '') merged[key] = ''
+      else if (value.trim() !== '') merged[key] = value
     }
   }
   const clears = input['clearProviderKeys']
@@ -1357,6 +1364,20 @@ export async function writeConfigSection(section: ConfigSection, data: unknown, 
     // local save into a 500 with memory and disk out of sync.
     try {
       await writeSecretFileAt(globalProviderKeysFile(), globalKeys)
+      // A tombstone is only needed while the global mirror still has the key.
+      // Once the mirror no longer contains it, drop the tombstone from the
+      // local file so a later global re-add is visible in this checkout.
+      const providerKeys = (validated as { providerKeys?: Record<string, string> }).providerKeys
+      if (providerKeys) {
+        let changed = false
+        for (const [key, value] of Object.entries(providerKeys)) {
+          if (value === '' && globalKeys[key] === undefined) {
+            delete providerKeys[key]
+            changed = true
+          }
+        }
+        if (changed) await writeJsonFile(filename, validated, isSecretConfigFile(filename))
+      }
     } catch (error: unknown) {
       const message = `could not update the global provider-key mirror: ${error instanceof Error ? error.message : String(error)}`
       console.error(message)

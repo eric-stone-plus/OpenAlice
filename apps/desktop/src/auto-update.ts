@@ -332,7 +332,12 @@ export function configureAutoUpdate(win: BrowserWindow, hooks: AutoUpdateHooks, 
       // electron-updater at a different file; on some early-error paths it
       // leaves downloadedVersion unchanged. Reject any new download activity
       // before touching the installer.
-      if (downloadGeneration !== generation || downloadBusy || pendingDownloads.length > 0) {
+      // Only activity for this version can change the installer. A background
+      // download for another release must not fail an install after services
+      // have already been stopped.
+      const sameVersionDownload = downloadBusy && downloadedVersion === version
+      if (downloadGeneration !== generation || sameVersionDownload
+        || pendingDownloads.some((download) => download.version === version)) {
         throw new Error('The native installer payload changed during handoff')
       }
       if (downloadedVersion !== version) throw new Error('The approved native payload changed during handoff')
@@ -368,14 +373,22 @@ export function configureAutoUpdate(win: BrowserWindow, hooks: AutoUpdateHooks, 
       const normalized = error instanceof Error ? error : new Error(String(error))
       // Pre-flight rejections still need an error status so the renderer leaves
       // the installing phase; only the installer-failure recovery hook is skipped.
-      if (prepareStarted || handoffStarted) await reportInstallFailure(normalized)
-      else {
-        // A pre-flight failure is retryable; only the installer-failure
-        // recovery hook is skipped, not the eligibility guard.
-        installFailureHandled = true
-        sendStatus({ phase: 'error', message: normalized.message })
+      try {
+        if (prepareStarted || handoffStarted) await reportInstallFailure(normalized)
+        else {
+          // A pre-flight failure is retryable; only the installer-failure
+          // recovery hook is skipped, not the eligibility guard.
+          installFailureHandled = true
+          try {
+            sendStatus({ phase: 'error', message: normalized.message })
+          } catch (statusError: unknown) {
+            console.warn(`could not send the updater error status: ${statusError instanceof Error ? statusError.message : String(statusError)}`)
+          }
+        }
+      } finally {
+        // A throwing renderer send must not strand the install guard.
+        installInProgress = false
       }
-      installInProgress = false
       throw normalized
     }
   }

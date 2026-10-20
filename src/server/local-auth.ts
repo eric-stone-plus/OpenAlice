@@ -9,6 +9,7 @@ import {
   LOCAL_TOKEN_PREFIX,
   localTokenPath as packageLocalTokenPath,
   localTokenTempName,
+  sweepStaleSealingTemps,
 } from '@traderalice/sealing-key'
 import type { Context, MiddlewareHandler } from 'hono'
 
@@ -80,6 +81,10 @@ async function readRacedToken(home: string): Promise<string | null> {
 /** Atomically provision the local token. Concurrent first callers converge on
  *  the same value (O_EXCL create; the loser reads the winner's file). */
 export async function ensureLocalToken(home = userDataHome): Promise<string> {
+  // Token provisioning does not call readKey(); sweep crash-left plaintext
+  // token temps here so an install that never reads a sealed config still
+  // cleans them up.
+  await sweepStaleSealingTemps(home)
   const existing = await readLocalToken(home)
   if (existing) {
     // A token restored from a backup or written by an older build may be
@@ -207,7 +212,9 @@ async function ensurePrivateMode(path: string, mode: number, kind: 'file' | 'dir
   // chmod(path) follows a symlink; operate on an open descriptor and verify it
   // is the same inode lstat just checked. A path swap after lstat then cannot
   // redirect the chmod/verification to another file.
-  const handle = await open(path, 'r')
+  const flags = constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0)
+    | (kind === 'file' ? (constants.O_NONBLOCK ?? 0) : 0)
+  const handle = await open(path, flags)
   try {
     const opened = await handle.stat()
     if (opened.dev !== linkInfo.dev || opened.ino !== linkInfo.ino) {

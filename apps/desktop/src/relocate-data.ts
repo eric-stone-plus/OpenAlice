@@ -106,21 +106,42 @@ async function releaseRelocateClaim(path: string, claim: RelocateClaim): Promise
 /** Restore a quarantined file create-if-absent, including on filesystems that
  *  reject hard links. Never overwrite a newer file at the destination. */
 async function restoreRelocateFile(quarantine: string, path: string): Promise<boolean> {
+  // Never copy directly to the final path: copyFile creates under the process
+  // umask and a crash mid-copy leaves a truncated key. Stage a 0600 temp and
+  // hard-link it into place (atomic, create-if-absent).
+  const temporary = `${path}.restore-${process.pid}-${randomUUID()}.tmp`
   try {
-    await link(quarantine, path)
-    await rm(quarantine, { force: true }).catch(() => undefined)
-    return true
-  } catch (error: unknown) {
-    const code = (error as NodeJS.ErrnoException).code
-    if (code === 'EEXIST') return false
-    if (!['EPERM', 'EOPNOTSUPP', 'ENOTSUP', 'EXDEV', 'ENOSYS'].includes(code ?? '')) return false
-  }
-  try {
-    await copyFile(quarantine, path, constants.COPYFILE_EXCL)
-    await rm(quarantine, { force: true }).catch(() => undefined)
-    return true
+    const data = await readFile(quarantine)
+    const handle = await open(temporary, 'wx', 0o600)
+    try {
+      await handle.writeFile(data)
+    } finally {
+      await handle.close()
+    }
+    await ensurePrivateMode(temporary)
+    try {
+      await link(temporary, path)
+      await rm(quarantine, { force: true }).catch(() => undefined)
+      return true
+    } catch (error: unknown) {
+      const code = (error as NodeJS.ErrnoException).code
+      if (code === 'EEXIST') return false
+      if (!['EPERM', 'EOPNOTSUPP', 'ENOTSUP', 'EXDEV', 'ENOSYS'].includes(code ?? '')) return false
+      // Some filesystems reject hard links. COPYFILE_EXCL still refuses to
+      // overwrite a newer file; the source is already a private temp.
+      try {
+        await copyFile(temporary, path, constants.COPYFILE_EXCL)
+        await ensurePrivateMode(path)
+        await rm(quarantine, { force: true }).catch(() => undefined)
+        return true
+      } catch {
+        return false
+      }
+    }
   } catch {
     return false
+  } finally {
+    await rm(temporary, { force: true }).catch(() => undefined)
   }
 }
 
@@ -184,11 +205,31 @@ function claimRecoveryMs(path: string, legacyRoot: string): number | undefined {
 }
 
 async function isUsableTokenFile(path: string): Promise<boolean> {
-  const info = await lstat(path).catch(() => null)
-  if (!info || info.isSymbolicLink() || !info.isFile()) return false
-  if (process.platform !== 'win32' && (info.mode & 0o077) !== 0) return false
-  const raw = await readFile(path, 'utf8').catch(() => null)
-  return raw !== null && LOCAL_TOKEN_PATTERN.test(raw.trim())
+  // Bind type/mode checks and the read to one descriptor, and tighten a
+  // readable legacy token the same way the server does. A separate lstat +
+  // readFile can be swapped to a symlink/FIFO in between.
+  const flags = constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0)
+  const handle = await open(path, flags).catch(() => null)
+  if (!handle) return false
+  try {
+    const info = await handle.stat()
+    if (!info.isFile()) return false
+    if (process.platform !== 'win32' && (info.mode & 0o077) !== 0) {
+      try {
+        await handle.chmod(0o600)
+      } catch {
+        return false
+      }
+      const after = await handle.stat()
+      if ((after.mode & 0o077) !== 0) return false
+    }
+    const raw = await handle.readFile('utf8')
+    return LOCAL_TOKEN_PATTERN.test(raw.trim())
+  } catch {
+    return false
+  } finally {
+    await handle.close().catch(() => undefined)
+  }
 }
 
 export async function relocateLegacyData(
@@ -221,8 +262,13 @@ export async function relocateLegacyData(
   await recoverStaleRelocateClaim(newToken)
   for (const [, to] of keyFiles) await recoverStaleRelocateClaim(to)
   // Rollback can create a relocate claim at a legacy key path on filesystems
-  // that reject hard links; recover those too.
-  for (const [from] of keyFiles) await recoverStaleRelocateClaim(from)
+  // that reject hard links; recover those too. A live marker is not key
+  // material, so remember it and skip the key/data move instead of letting
+  // readKey validate the marker as a key.
+  const liveRelocateClaims: string[] = []
+  for (const [from] of keyFiles) {
+    if (await recoverStaleRelocateClaim(from) === 'live') liveRelocateClaims.push(from)
+  }
   const keyTargetExists = keyFiles.some(([, to]) => existsSync(to))
   const legacyKeyPresent = keyFiles.some(([from]) => existsSync(from))
     || fingerprintFiles.some(([from]) => existsSync(from))
@@ -240,6 +286,7 @@ export async function relocateLegacyData(
   const destinationResidue: string[] = []
   const movedKeyDestinations = new Set<string>()
   const movedKeyPairs: Array<{ from: string; to: string }> = []
+  const movedFingerprintPairs: Array<{ from: string; to: string }> = []
   const rollbackMovedKeys = async (): Promise<void> => {
     for (const pair of [...movedKeyPairs].reverse()) {
       try {
@@ -267,6 +314,20 @@ export async function relocateLegacyData(
         console.warn(`[relocate] could not roll back ${pair.to}: ${error instanceof Error ? error.message : String(error)}`)
       }
     }
+    // The fingerprint moved before the key. If the key move was rolled back,
+    // put the verifier back too; otherwise the legacy pair fails readKey on
+    // the next boot even though the legacy key is still there.
+    for (const pair of [...movedFingerprintPairs].reverse()) {
+      try {
+        if (existsSync(pair.from)) continue
+        if (await moveIfAbsent(pair.to, pair.from) === 'moved') {
+          const index = movedFingerprintPairs.indexOf(pair)
+          if (index >= 0) movedFingerprintPairs.splice(index, 1)
+        }
+      } catch (error: unknown) {
+        console.warn(`[relocate] could not roll back ${pair.to}: ${error instanceof Error ? error.message : String(error)}`)
+      }
+    }
   }
 
   // Re-check both key forms instead of trusting the caller's one-time
@@ -275,7 +336,17 @@ export async function relocateLegacyData(
   const hasDestinationKey = keyTargetExists || destinationKeyAppeared
   let keysCompatible = !hasDestinationKey
   let keyComparisonError: string | null = null
-  if (hasDestinationKey) {
+  if (liveRelocateClaims.length > 0) {
+    keysCompatible = false
+    keyComparisonError = `live relocation claim at ${liveRelocateClaims.join(', ')}`
+    console.warn(`[relocate] ${keyComparisonError}; leaving the legacy key and data in place`)
+    await writeFile(
+      join(legacyRoot, 'KEY-NOT-MOVED.txt'),
+      `OpenAlice found a live relocation claim at ${liveRelocateClaims.join(', ')} and did not move the legacy sealing key.\n` +
+      'The legacy sealed stores were not moved. Retry after the other OpenAlice process finishes.\n',
+    ).catch(() => undefined)
+  }
+  if (hasDestinationKey && liveRelocateClaims.length === 0) {
     try {
       const destinationKey = await readKey(newRoot, process.env, { migrate: false })
       let legacyKey: Buffer | null = null
@@ -358,7 +429,10 @@ export async function relocateLegacyData(
     for (const [from, to] of fingerprintFiles) {
       if (!existsSync(from)) continue
       try {
-        if (await moveIfAbsent(from, to) === 'moved') moved = true
+        if (await moveIfAbsent(from, to) === 'moved') {
+          moved = true
+          movedFingerprintPairs.push({ from, to })
+        }
       } catch (error: unknown) {
         // The fingerprint is a verifier, not key material. A conflict or
         // unreadable destination must not block the key/data move; the next
@@ -367,7 +441,7 @@ export async function relocateLegacyData(
       }
     }
   }
-  if (!hasDestinationKey && failures.length === 0) {
+  if (!hasDestinationKey && failures.length === 0 && liveRelocateClaims.length === 0) {
     for (const [from, to] of keyFiles) {
       if (await sealingClaimIsLive(from, claimRecoveryMs(from, legacyRoot))) {
         keysCompatible = false
@@ -413,6 +487,24 @@ export async function relocateLegacyData(
           if (existsSync(from)) keyRemovalFailures.push(from)
         }
       } catch (error: unknown) {
+        if (error instanceof MoveBusyError) {
+          // Another OpenAlice process is creating the destination key. Treat it
+          // like a conflict: leave the legacy key/data in place with a marker
+          // instead of aborting startup.
+          keysCompatible = false
+          keyComparisonError = error.message
+          console.warn(`[relocate] ${error.message}`)
+          await rollbackMovedKeys()
+          await rm(join(legacyRoot, 'KEY-MOVED.txt'), { force: true }).catch(() => undefined)
+          await writeFile(
+            join(legacyRoot, 'KEY-NOT-MOVED.txt'),
+            'OpenAlice found a live relocation claim at the destination and did not move the legacy sealing key.\n' +
+            'The legacy sealed stores were not moved. Retry after the other OpenAlice process finishes.\n',
+          ).catch((writeError: unknown) => {
+            console.warn(`[relocate] could not write KEY-NOT-MOVED.txt: ${writeError instanceof Error ? writeError.message : String(writeError)}`)
+          })
+          break
+        }
         if (error instanceof MoveConflictError) {
           // A destination key appeared after the pre-check. The destination is
           // authoritative for its data; leave the legacy key and sealed
@@ -463,7 +555,7 @@ export async function relocateLegacyData(
         console.warn(`[relocate] could not write KEY-MOVED.txt: ${error instanceof Error ? error.message : String(error)}`)
       })
     }
-  } else if (hasDestinationKey) {
+  } else if (hasDestinationKey && liveRelocateClaims.length === 0) {
     // If the destination key is the same, a legacy plaintext copy is
     // redundant; remove it instead of leaving a readable copy in the old
     // userData directory. If anything is ambiguous, keep it and write the
@@ -769,6 +861,14 @@ class MoveConflictError extends Error {
   }
 }
 
+/** A live destination claim is a concurrent writer, not a bad destination. */
+class MoveBusyError extends Error {
+  constructor(to: string) {
+    super(`destination ${to} is a live relocation claim; retry after the other OpenAlice process finishes`)
+    this.name = 'MoveBusyError'
+  }
+}
+
 async function settleExistingDestination(from: string, to: string): Promise<MoveOutcome> {
   // Re-check the destination here too: a symlink created after moveIfAbsent's
   // preflight must not be followed by sameContents()/removeSource().
@@ -794,6 +894,15 @@ async function settleExistingDestination(from: string, to: string): Promise<Move
     const sourceNow = await readFile(from).catch(() => null)
     if (!sourceNow) return 'absent'
     if (!sourceNow.equals(compared)) throw new MoveConflictError(from, to)
+    // The destination can be replaced after the first read. Re-check it after
+    // the source read, immediately before deleting the source, so a swapped
+    // destination cannot leave a dangling link and no key.
+    const destinationInfoNow = await lstat(to).catch(() => null)
+    if (!destinationInfoNow || destinationInfoNow.isSymbolicLink() || !destinationInfoNow.isFile()) {
+      throw new MoveConflictError(from, to)
+    }
+    const destinationNow = await readFile(to).catch(() => null)
+    if (!destinationNow || !destinationNow.equals(compared)) throw new MoveConflictError(from, to)
     await removeSource(from)
     return 'identical'
   }
@@ -816,7 +925,7 @@ export async function moveIfAbsent(from: string, to: string): Promise<MoveOutcom
   }
   const staleClaim = await recoverStaleRelocateClaim(to)
   if (staleClaim === 'live') {
-    throw new Error(`destination ${to} is a live relocation claim; retry after the other OpenAlice process finishes`)
+    throw new MoveBusyError(to)
   }
   try {
     if (await realpath(from) === await realpath(to)) return 'absent'
@@ -853,10 +962,15 @@ export async function moveIfAbsent(from: string, to: string): Promise<MoveOutcom
       const claim = await createRelocateClaim(to)
       if (!claim) return await settleExistingDestination(from, to)
       let installed = false
+      let ownershipVerified = false
       try {
         if (!(await ownsRelocateClaim(to, claim))) {
+          // The path is no longer our claim (another process installed a key
+          // or its own claim). Do not release it: rename would quarantine the
+          // other process's file.
           throw new Error(`destination ${to} changed while the key was being moved`)
         }
+        ownershipVerified = true
         await rename(temporary, to)
         // From here `to` is the real key, not the claim. Never release it on a
         // later chmod/read failure: that could strand the only copy in a
@@ -867,7 +981,7 @@ export async function moveIfAbsent(from: string, to: string): Promise<MoveOutcom
           throw new Error(`destination ${to} changed while the key was being moved`)
         }
       } catch (claimError: unknown) {
-        if (!installed) await releaseRelocateClaim(to, claim)
+        if (ownershipVerified && !installed) await releaseRelocateClaim(to, claim)
         throw claimError
       }
     }

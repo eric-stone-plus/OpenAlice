@@ -28,6 +28,7 @@ export {
   keyStatus,
   loadOrCreateKey,
   readKey,
+  sweepStaleSealingTemps,
   sealAt,
   sealingBackend,
   sealingKeyCredentialPath,

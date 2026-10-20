@@ -36,7 +36,7 @@ import { homedir } from 'node:os'
  *  store (~/.openalice/provider-keys.json) — one OpenAlice home. */
 const DEFAULT_USER_DATA_HOME = resolve(homedir(), '.openalice')
 
-const USER_DATA_HOME = process.env['OPENALICE_HOME'] ?? DEFAULT_USER_DATA_HOME
+const USER_DATA_HOME = process.env['OPENALICE_HOME']?.trim() || DEFAULT_USER_DATA_HOME
 const APP_RESOURCES_HOME = process.env['OPENALICE_APP_HOME'] ?? process.cwd()
 
 /** Path under `data/` — user-produced state. */

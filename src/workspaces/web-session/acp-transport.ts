@@ -130,6 +130,7 @@ export class AcpTransport implements WebSessionTransport {
       await this.ensureConfigPin()
     } catch (error) {
       this.turnActive = false
+      this.ctx.state.fail(error instanceof Error ? error.message : String(error))
       throw error
     }
     // A notification-triggered restore or dispose can land while the pin check
@@ -153,6 +154,10 @@ export class AcpTransport implements WebSessionTransport {
 
   async abort(): Promise<void> {
     if (!this.sessionId) return
+    // A cancel that lands while prompt() is awaiting the pin restore must be
+    // visible to its post-await check; otherwise it sends session/prompt after
+    // the user already cancelled.
+    this.turnActive = false
     await this.peer.notify('session/cancel', { sessionId: this.sessionId })
   }
 
@@ -196,6 +201,7 @@ export class AcpTransport implements WebSessionTransport {
     // Capture the turn before the pin round-trip: the runtime is already
     // unblocked and may finish the turn while the restore is in flight.
     const generation = this.turnGeneration
+    if (this.ctx.channel.closed) return
     try {
       await this.ensureConfigPin()
     } catch (error) {
@@ -208,6 +214,9 @@ export class AcpTransport implements WebSessionTransport {
       }
       throw error
     }
+    // The turn may have completed or the channel may have closed during the
+    // pin round-trip; do not report a successful answer for a dead session.
+    if (this.ctx.channel.closed || generation !== this.turnGeneration) return
   }
 
   dispose(): void {
@@ -358,9 +367,10 @@ export class AcpTransport implements WebSessionTransport {
     try {
       await this.restoreConfigPin()
     } catch (error: unknown) {
-      const normalized = error instanceof Error ? error : new Error(String(error))
-      if (!this.ctx.channel.closed) this.ctx.state.fail(normalized.message)
-      throw normalized
+      // Callers own the state transition: respond()/schedulePinRestore() only
+      // fail the turn after checking the generation, and prompt() fails the
+      // turn it just claimed. Failing here can mark a finished/new turn failed.
+      throw error instanceof Error ? error : new Error(String(error))
     }
   }
 

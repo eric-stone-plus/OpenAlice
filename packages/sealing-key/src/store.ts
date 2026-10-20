@@ -149,13 +149,13 @@ async function cacheCredential(
   path: string,
   key: Buffer,
   expected?: CredentialIdentity,
-): Promise<void> {
+): Promise<boolean> {
   const info = await stat(path).catch(() => null)
   if (!info || (expected && !sameIdentity(info, expected))) {
     // The credential changed between the read/decrypt and this stat; caching
     // the old key under the new identity would make the next read stale.
     credentialKeyCache.delete(path)
-    return
+    return false
   }
   credentialKeyCache.set(path, {
     key,
@@ -164,6 +164,7 @@ async function cacheCredential(
     size: info.size,
     mtimeMs: info.mtimeMs,
   })
+  return true
 }
 
 const FILE_KEY_TEMP_PREFIX = 'sealing.key.'
@@ -209,7 +210,7 @@ function isProcessAlive(pid: number): boolean {
 const sweptHomes = new Set<string>()
 const sweepInFlight = new Map<string, Promise<void>>()
 
-async function sweepStaleKeyTemps(home: string): Promise<void> {
+export async function sweepStaleSealingTemps(home: string): Promise<void> {
   if (sweptHomes.has(home)) return
   const inFlight = sweepInFlight.get(home)
   if (inFlight) return inFlight
@@ -294,9 +295,10 @@ async function claimDestination(path: string): Promise<DestinationClaim | null> 
   } catch (error: unknown) {
     if (isNodeError(error, 'EEXIST')) return null
     // Do not leave a claim behind when the caller never receives its identity.
-    // This path only runs after our own O_EXCL create succeeded.
+    // If we could not even stat our own claim, leave it for age-bounded
+    // recovery: an unconditional rm could delete a key installed by a
+    // concurrent recovery after it quarantined the empty claim.
     if (identity) await releaseClaim(path, identity)
-    else if (created) await rm(path, { force: true }).catch(() => undefined)
     throw error
   }
 }
@@ -491,27 +493,32 @@ async function recoverEmptyClaim(path: string, recoveryMs = CLAIM_RECOVERY_MS): 
   if (!(await acquireClaimLock(path))) return 'live'
   const quarantine = `${path}.dead-claim-${Date.now()}-${randomUUID()}`
   try {
-    await rename(path, quarantine)
-  } catch (error: unknown) {
-    if (isNodeError(error, 'ENOENT')) return 'gone'
-    return 'unknown'
-  } finally {
-    await releaseClaimLock(path)
-  }
-  const moved = await stat(quarantine).catch(() => null)
-  if (!moved || moved.size !== 0) {
-    const restored = await restoreQuarantined(quarantine, path)
-    if (!restored) {
-      warn(`an interrupted claim at ${path} could not be restored from ${quarantine}`)
+    try {
+      await rename(path, quarantine)
+    } catch (error: unknown) {
+      if (isNodeError(error, 'ENOENT')) return 'gone'
       return 'unknown'
     }
-    return 'live'
+    const moved = await stat(quarantine).catch(() => null)
+    if (!moved || moved.size !== 0) {
+      const restored = await restoreQuarantined(quarantine, path)
+      if (!restored) {
+        warn(`an interrupted claim at ${path} could not be restored from ${quarantine}`)
+        return 'unknown'
+      }
+      return 'live'
+    }
+    await rm(quarantine, { force: true }).catch((error: unknown) => {
+      warn(`could not remove the empty-claim quarantine at ${quarantine}: ${errorMessage(error)}`)
+    })
+    warn(`${path} was a stale zero-length claim; removed`)
+    return 'dead'
+  } finally {
+    // Keep the lock across rename + verification + restore. Releasing it after
+    // the rename lets a creator install a key that the unlocked restore then
+    // displaces.
+    await releaseClaimLock(path)
   }
-  await rm(quarantine, { force: true }).catch((error: unknown) => {
-    warn(`could not remove the empty-claim quarantine at ${quarantine}: ${errorMessage(error)}`)
-  })
-  warn(`${path} was a stale zero-length claim; removed`)
-  return 'dead'
 }
 
 async function isClaimFile(path: string): Promise<boolean> {
@@ -602,42 +609,45 @@ async function recoverClaim(path: string, raw: Buffer | string, recoveryMs = CLA
   if (!(await acquireClaimLock(path))) return 'live'
   const quarantine = `${path}.dead-claim-${Date.now()}-${randomUUID()}`
   try {
-    await rename(path, quarantine)
-  } catch (error: unknown) {
-    // Another process recovered it first; the caller re-reads the destination.
-    if (isNodeError(error, 'ENOENT')) return 'gone'
-    warn(`could not quarantine the stale claim at ${path}: ${errorMessage(error)}`)
-    return 'unknown'
-  } finally {
-    await releaseClaimLock(path)
-  }
-  let moved: Buffer
-  try {
-    moved = await readFile(quarantine)
-  } catch (error: unknown) {
-    warn(`could not verify the quarantined claim at ${quarantine}: ${errorMessage(error)}`)
-    // The quarantine may hold a real key moved after our read; restore it
-    // rather than leaving the destination empty.
-    const restored = await restoreQuarantined(quarantine, path)
-    return restored ? 'live' : 'unknown'
-  }
-  // The path may have been replaced between our read and the rename. Never
-  // treat a real key as a dead claim: restore it create-if-absent.
-  if (!moved.equals(Buffer.isBuffer(raw) ? raw : Buffer.from(raw))) {
-    const restored = await restoreQuarantined(quarantine, path)
-    if (!restored) {
-      warn(`the quarantined file at ${quarantine} was not a claim and could not be restored to ${path}`)
+    try {
+      await rename(path, quarantine)
+    } catch (error: unknown) {
+      // Another process recovered it first; the caller re-reads the destination.
+      if (isNodeError(error, 'ENOENT')) return 'gone'
+      warn(`could not quarantine the stale claim at ${path}: ${errorMessage(error)}`)
       return 'unknown'
     }
-    return 'live'
+    let moved: Buffer
+    try {
+      moved = await readFile(quarantine)
+    } catch (error: unknown) {
+      warn(`could not verify the quarantined claim at ${quarantine}: ${errorMessage(error)}`)
+      // The quarantine may hold a real key moved after our read; restore it
+      // rather than leaving the destination empty.
+      const restored = await restoreQuarantined(quarantine, path)
+      return restored ? 'live' : 'unknown'
+    }
+    // The path may have been replaced between our read and the rename. Never
+    // treat a real key as a dead claim: restore it create-if-absent.
+    if (!moved.equals(Buffer.isBuffer(raw) ? raw : Buffer.from(raw))) {
+      const restored = await restoreQuarantined(quarantine, path)
+      if (!restored) {
+        warn(`the quarantined file at ${quarantine} was not a claim and could not be restored to ${path}`)
+        return 'unknown'
+      }
+      return 'live'
+    }
+    // The quarantined bytes are only the claim marker, not key material; remove
+    // them so crash residue cannot accumulate in the state directory.
+    await rm(quarantine, { force: true }).catch((error: unknown) => {
+      warn(`could not remove the stale claim quarantine at ${quarantine}: ${errorMessage(error)}`)
+    })
+    warn(`${path} was a claim left by process ${claim.pid}; removed`)
+    return 'dead'
+  } finally {
+    // Keep the lock across rename + verification + restore; see recoverEmptyClaim.
+    await releaseClaimLock(path)
   }
-  // The quarantined bytes are only the claim marker, not key material; remove
-  // them so crash residue cannot accumulate in the state directory.
-  await rm(quarantine, { force: true }).catch((error: unknown) => {
-    warn(`could not remove the stale claim quarantine at ${quarantine}: ${errorMessage(error)}`)
-  })
-  warn(`${path} was a claim left by process ${claim.pid}; removed`)
-  return 'dead'
 }
 
 /** Age-bounded recovery for a sealing key/credential path, exposed so the
@@ -784,7 +794,7 @@ export async function readKey(
   options: ReadKeyOptions = {},
 ): Promise<Buffer | null> {
   const migrate = options.migrate !== false
-  await sweepStaleKeyTemps(home)
+  await sweepStaleSealingTemps(home)
   const backend = sealingBackend(env)
   if (backend === 'file') {
     if (await exists(sealingKeyCredentialPath(home))) {
@@ -983,21 +993,26 @@ export async function deleteKey(home: string): Promise<void> {
 
 async function readFileKey(home: string, waitUntil = 0): Promise<Buffer | null> {
   const path = sealingKeyPath(home)
-  const linkInfo = await lstat(path).catch((error: unknown) => {
+  // Bind validation and read to one descriptor. A separate lstat+readFile
+  // lets a same-UID process swap in a symlink or FIFO between the checks.
+  const flags = constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0)
+  const handle = await open(path, flags).catch((error: unknown) => {
     if (isNodeError(error, 'ENOENT')) return null
+    if (isNodeError(error, 'ELOOP')) {
+      throw new SealingBackendUnavailableError(`${path} must not be a symlink`)
+    }
     throw error
   })
-  if (!linkInfo) return null
-  // Reject a FIFO/symlink before readFile can block or follow it.
-  if (linkInfo.isSymbolicLink() || !linkInfo.isFile()) {
-    throw new SealingBackendUnavailableError(`${path} must be a regular file`)
-  }
+  if (!handle) return null
   let raw: string
   try {
-    raw = await readFile(path, 'utf-8')
-  } catch (error: unknown) {
-    if (isNodeError(error, 'ENOENT')) return null
-    throw error
+    const info = await handle.stat()
+    if (!info.isFile()) {
+      throw new SealingBackendUnavailableError(`${path} must be a regular file`)
+    }
+    raw = await handle.readFile('utf-8')
+  } finally {
+    await handle.close().catch(() => undefined)
   }
   try {
     return parseKeyMaterial(raw)
@@ -1164,7 +1179,7 @@ async function readCredentialKey(home: string, env: NodeJS.ProcessEnv, attempt =
   const content = await waitForNonEmpty(path)
   if (content === 'missing') return null
   if (content === 'empty') {
-    return readCredentialAfterClaim(path, env)
+    return (await readCredentialAfterClaim(path, env))?.key ?? null
   }
   const raw = await readFile(path).catch((error: unknown) => {
     if (isNodeError(error, 'ENOENT')) return null
@@ -1175,7 +1190,7 @@ async function readCredentialKey(home: string, env: NodeJS.ProcessEnv, attempt =
   if (claim) {
     // Validate the claim before consulting the cache: a deleted credential
     // recreated as a claim must not return the previous process's key.
-    return readCredentialAfterClaim(path, env)
+    return (await readCredentialAfterClaim(path, env))?.key ?? null
   }
   // Bind the cache lookup to the identity after the bytes were read, not the
   // pre-read stat: a replacement during waitForNonEmpty/readFile must not
@@ -1195,7 +1210,9 @@ async function readCredentialKey(home: string, env: NodeJS.ProcessEnv, attempt =
     if (attempt < 1) return readCredentialKey(home, env, 1)
     throw new TransientClaimError('credential changed while it was being read')
   }
-  await cacheCredential(path, key, info)
+  if (!(await cacheCredential(path, key, info))) {
+    throw new TransientClaimError('credential changed while it was being read')
+  }
   return key
 }
 
@@ -1228,7 +1245,12 @@ async function createCredentialKey(home: string, env: NodeJS.ProcessEnv): Promis
   return writeCredentialKey(home, randomBytes(SEALING_KEY_BYTES), env)
 }
 
-async function readCredentialAfterClaim(path: string, env: NodeJS.ProcessEnv): Promise<Buffer | null> {
+interface VerifiedCredential {
+  readonly key: Buffer
+  readonly identity: CredentialIdentity
+}
+
+async function readCredentialAfterClaim(path: string, env: NodeJS.ProcessEnv): Promise<VerifiedCredential | null> {
   const deadline = Date.now() + CREDENTIAL_CLAIM_WAIT_MS
   for (;;) {
     const content = await waitForNonEmpty(path, 100, CREDENTIAL_CLAIM_RECOVERY_MS)
@@ -1278,7 +1300,7 @@ async function readCredentialAfterClaim(path: string, env: NodeJS.ProcessEnv): P
         }
         throw new TransientClaimError('credential changed while it was being read')
       }
-      return key
+      return { key, identity: after }
     }
     const state = await recoverClaim(path, raw, CREDENTIAL_CLAIM_RECOVERY_MS)
     if (state === 'dead') return null
@@ -1318,13 +1340,12 @@ async function writeCredentialKey(
   const adoptExisting = async (): Promise<Buffer | null> => {
     const existing = await readCredentialAfterClaim(path, env)
     if (!existing) return null
-    // readCredentialAfterClaim may wait for a claim to resolve; capture the
-    // identity after that wait, not before it.
-    const current = await stat(path).catch(() => null)
-    if (!current) return null
-    await cacheCredential(path, existing, current)
-    await writeKeyFingerprint(home, existing)
-    return existing
+    // Use the identity verified by readCredentialAfterClaim. Re-statting here
+    // and caching the old key under a replacement inode would make every later
+    // read return the stale key without decrypting.
+    if (!(await cacheCredential(path, existing.key, existing.identity))) return null
+    await writeKeyFingerprint(home, existing.key)
+    return existing.key
   }
   try {
     // Feed the key to systemd-creds on stdin. A temporary plaintext file in
@@ -1409,7 +1430,12 @@ async function writeCredentialKey(
       await removeCredentialIfSame(path, installed)
       throw new SealingBackendUnavailableError('systemd-creds credential did not round-trip')
     }
-    await cacheCredential(path, roundTrip, installed ?? undefined)
+    if (!(await cacheCredential(path, roundTrip, installed ?? undefined))) {
+      // Another process replaced the credential after the round-trip. Do not
+      // return this key: migrateLegacyKey would delete the only plaintext copy
+      // while the installed credential holds different material.
+      throw new TransientClaimError('credential changed while it was being verified')
+    }
     await writeKeyFingerprint(home, roundTrip)
     return roundTrip
   } catch (error: unknown) {
