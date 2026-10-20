@@ -223,7 +223,12 @@
         "libuuid1",
         "libsecret-1-0",
         "git"
-      ]
+      ],
+      "desktop": {
+        "entry": {
+          "Icon": "/opt/OpenAlice/resources/launcher-icon.png"
+        }
+      }
     },
     "rpm": {
       "depends": [
@@ -236,7 +241,12 @@
         "at-spi2-core",
         "(libuuid or libuuid1)",
         "git"
-      ]
+      ],
+      "desktop": {
+        "entry": {
+          "Icon": "/opt/OpenAlice/resources/launcher-icon.png"
+        }
+      }
     },
     "nsis": {
       "oneClick": false,
@@ -274,6 +284,10 @@
       {
         "from": "apps/desktop/build/icons/256x256.png",
         "to": "icon.png"
+      },
+      {
+        "from": "apps/desktop/build/icons/512x512.png",
+        "to": "launcher-icon.png"
       },
       {
         "from": "apps/desktop/build/tray-pet.png",
