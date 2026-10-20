@@ -109,7 +109,7 @@ async function restoreRelocateFile(quarantine: string, path: string): Promise<bo
   // Never copy directly to the final path: copyFile creates under the process
   // umask and a crash mid-copy leaves a truncated key. Stage a 0600 temp and
   // hard-link it into place (atomic, create-if-absent).
-  const temporary = `${path}.restore-${process.pid}-${randomUUID()}.tmp`
+  const temporary = join(dirname(path), `.relocate-${basename(path)}.${process.pid}.${randomUUID()}.tmp`)
   try {
     const data = await readFile(quarantine)
     const handle = await open(temporary, 'wx', 0o600)
@@ -204,10 +204,33 @@ function claimRecoveryMs(path: string, legacyRoot: string): number | undefined {
   return path === sealingKeyCredentialPath(legacyRoot) ? CREDENTIAL_CLAIM_RECOVERY_MS : undefined
 }
 
+async function readRegularFile(path: string): Promise<Buffer | null> {
+  if (!constants.O_NOFOLLOW) {
+    const linkInfo = await lstat(path).catch(() => null)
+    if (!linkInfo || linkInfo.isSymbolicLink() || !linkInfo.isFile()) return null
+  }
+  const flags = constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0)
+  const handle = await open(path, flags).catch(() => null)
+  if (!handle) return null
+  try {
+    const info = await handle.stat()
+    if (!info.isFile()) return null
+    return await handle.readFile()
+  } catch {
+    return null
+  } finally {
+    await handle.close().catch(() => undefined)
+  }
+}
+
 async function isUsableTokenFile(path: string): Promise<boolean> {
   // Bind type/mode checks and the read to one descriptor, and tighten a
   // readable legacy token the same way the server does. A separate lstat +
   // readFile can be swapped to a symlink/FIFO in between.
+  if (!constants.O_NOFOLLOW) {
+    const linkInfo = await lstat(path).catch(() => null)
+    if (!linkInfo || linkInfo.isSymbolicLink() || !linkInfo.isFile()) return false
+  }
   const flags = constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0)
   const handle = await open(path, flags).catch(() => null)
   if (!handle) return false
@@ -286,7 +309,7 @@ export async function relocateLegacyData(
   const destinationResidue: string[] = []
   const movedKeyDestinations = new Set<string>()
   const movedKeyPairs: Array<{ from: string; to: string }> = []
-  const movedFingerprintPairs: Array<{ from: string; to: string }> = []
+  const movedFingerprintPairs: Array<{ from: string; to: string; identical: boolean }> = []
   const rollbackMovedKeys = async (): Promise<void> => {
     for (const pair of [...movedKeyPairs].reverse()) {
       try {
@@ -320,10 +343,18 @@ export async function relocateLegacyData(
     for (const pair of [...movedFingerprintPairs].reverse()) {
       try {
         if (existsSync(pair.from)) continue
-        if (await moveIfAbsent(pair.to, pair.from) === 'moved') {
-          const index = movedFingerprintPairs.indexOf(pair)
-          if (index >= 0) movedFingerprintPairs.splice(index, 1)
+        if (pair.identical) {
+          // The destination already had the same fingerprint; moveIfAbsent
+          // removed the legacy copy. Copy it back without consuming the
+          // destination's verifier.
+          if (!existsSync(pair.to)) continue
+          await copyFile(pair.to, pair.from, constants.COPYFILE_EXCL)
+          await ensurePrivateMode(pair.from)
+        } else if (await moveIfAbsent(pair.to, pair.from) !== 'moved') {
+          continue
         }
+        const index = movedFingerprintPairs.indexOf(pair)
+        if (index >= 0) movedFingerprintPairs.splice(index, 1)
       } catch (error: unknown) {
         console.warn(`[relocate] could not roll back ${pair.to}: ${error instanceof Error ? error.message : String(error)}`)
       }
@@ -406,7 +437,7 @@ export async function relocateLegacyData(
   // remain readable. The two key forms are one unit: if the destination
   // already has either form, do not add the other form beside it (that would
   // create an ambiguous key pair). Provider keys are independent.
-  if (!hasDestinationKey && keyFiles.every(([from]) => existsSync(from))) {
+  if (!hasDestinationKey && liveRelocateClaims.length === 0 && keyFiles.every(([from]) => existsSync(from))) {
     // Both legacy forms present: moving them verbatim is only safe if they
     // hold the same key. readKey() rejects a mismatch (and a live claim).
     // A live/empty claim is transient. Let the loop below leave the pair in
@@ -422,16 +453,17 @@ export async function relocateLegacyData(
       }
     }
   }
-  if (!hasDestinationKey && failures.length === 0) {
+  if (!hasDestinationKey && failures.length === 0 && liveRelocateClaims.length === 0) {
     // The fingerprint is a verifier used by copied-home/systemd-creds reads.
     // Move it before key material so a failure leaves the key in the legacy
     // root and a marker, never a moved key with no trust anchor.
     for (const [from, to] of fingerprintFiles) {
       if (!existsSync(from)) continue
       try {
-        if (await moveIfAbsent(from, to) === 'moved') {
+        const outcome = await moveIfAbsent(from, to)
+        if (outcome === 'moved' || outcome === 'identical') {
           moved = true
-          movedFingerprintPairs.push({ from, to })
+          movedFingerprintPairs.push({ from, to, identical: outcome === 'identical' })
         }
       } catch (error: unknown) {
         // The fingerprint is a verifier, not key material. A conflict or
@@ -886,12 +918,12 @@ async function settleExistingDestination(from: string, to: string): Promise<Move
     // sameContents() only proves the bytes matched at read time. Re-read both
     // sides after the mode change and before deleting the source; a concurrent
     // replacement must not turn the only correct key into a deleted file.
-    const compared = await readFile(from).catch(() => null)
+    const compared = await readRegularFile(from)
     if (!compared) return 'absent'
     await ensurePrivateMode(to)
-    const current = await readFile(to).catch(() => null)
+    const current = await readRegularFile(to)
     if (!current || !current.equals(compared)) throw new MoveConflictError(from, to)
-    const sourceNow = await readFile(from).catch(() => null)
+    const sourceNow = await readRegularFile(from)
     if (!sourceNow) return 'absent'
     if (!sourceNow.equals(compared)) throw new MoveConflictError(from, to)
     // The destination can be replaced after the first read. Re-check it after
@@ -901,7 +933,7 @@ async function settleExistingDestination(from: string, to: string): Promise<Move
     if (!destinationInfoNow || destinationInfoNow.isSymbolicLink() || !destinationInfoNow.isFile()) {
       throw new MoveConflictError(from, to)
     }
-    const destinationNow = await readFile(to).catch(() => null)
+    const destinationNow = await readRegularFile(to)
     if (!destinationNow || !destinationNow.equals(compared)) throw new MoveConflictError(from, to)
     await removeSource(from)
     return 'identical'

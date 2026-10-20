@@ -1,3 +1,6 @@
 # Workflow definitions can change the security gates themselves; require the
 # repository owner's review. Branch protection must also require this review.
+/.github/CODEOWNERS @eric-stone-plus
 /.github/workflows/ @eric-stone-plus
+/.gitleaks.toml @eric-stone-plus
+/.gitleaksignore @eric-stone-plus

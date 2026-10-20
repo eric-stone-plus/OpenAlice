@@ -995,11 +995,26 @@ async function readFileKey(home: string, waitUntil = 0): Promise<Buffer | null> 
   const path = sealingKeyPath(home)
   // Bind validation and read to one descriptor. A separate lstat+readFile
   // lets a same-UID process swap in a symlink or FIFO between the checks.
-  const flags = constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0)
+  // Windows has no O_NOFOLLOW; keep an explicit lstat rejection there.
+  const noFollow = constants.O_NOFOLLOW
+  if (!noFollow) {
+    const linkInfo = await lstat(path).catch((error: unknown) => {
+      if (isNodeError(error, 'ENOENT')) return null
+      throw error
+    })
+    if (!linkInfo) return null
+    if (linkInfo.isSymbolicLink() || !linkInfo.isFile()) {
+      throw new SealingBackendUnavailableError(`${path} must be a regular file`)
+    }
+  }
+  const flags = constants.O_RDONLY | (noFollow ?? 0) | (constants.O_NONBLOCK ?? 0)
   const handle = await open(path, flags).catch((error: unknown) => {
     if (isNodeError(error, 'ENOENT')) return null
     if (isNodeError(error, 'ELOOP')) {
       throw new SealingBackendUnavailableError(`${path} must not be a symlink`)
+    }
+    if (['ENXIO', 'ENODEV', 'EMLINK'].includes((error as NodeJS.ErrnoException).code ?? '')) {
+      throw new SealingBackendUnavailableError(`${path} must be a regular file`, error)
     }
     throw error
   })
@@ -1211,6 +1226,7 @@ async function readCredentialKey(home: string, env: NodeJS.ProcessEnv, attempt =
     throw new TransientClaimError('credential changed while it was being read')
   }
   if (!(await cacheCredential(path, key, info))) {
+    if (attempt < 1) return readCredentialKey(home, env, 1)
     throw new TransientClaimError('credential changed while it was being read')
   }
   return key
@@ -1430,10 +1446,12 @@ async function writeCredentialKey(
       await removeCredentialIfSame(path, installed)
       throw new SealingBackendUnavailableError('systemd-creds credential did not round-trip')
     }
-    if (!(await cacheCredential(path, roundTrip, installed ?? undefined))) {
-      // Another process replaced the credential after the round-trip. Do not
-      // return this key: migrateLegacyKey would delete the only plaintext copy
-      // while the installed credential holds different material.
+    if (!installed || !(await cacheCredential(path, roundTrip, installed))) {
+      // Another process replaced the credential after the round-trip. Retry
+      // once; on the retry link()/adoptExisting() converges on the winner.
+      if (attempt < 1) return writeCredentialKey(home, key, env, attempt + 1)
+      // Do not return this key: migrateLegacyKey would delete the only
+      // plaintext copy while the installed credential holds different material.
       throw new TransientClaimError('credential changed while it was being verified')
     }
     await writeKeyFingerprint(home, roundTrip)

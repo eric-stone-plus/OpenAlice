@@ -54,6 +54,7 @@ export class AcpTransport implements WebSessionTransport {
   private sessionId: string | null
   private pendingUserText: string | null = null
   private turnActive = false
+  private cancelRequested = false
   private turnGeneration = 0
   private pinRestoreRunning: Promise<void> | null = null
   private pinRestorePending = false
@@ -122,6 +123,7 @@ export class AcpTransport implements WebSessionTransport {
     // Claim the turn before the first await: a second prompt can arrive while
     // the pin restore is in flight and must not pass the same check.
     this.turnActive = true
+    this.cancelRequested = false
     const turnGeneration = ++this.turnGeneration
     // The app-owned model/effort/mode invariant must hold before every turn,
     // not only after session/new or a configure() call. A runtime-initiated
@@ -130,12 +132,13 @@ export class AcpTransport implements WebSessionTransport {
       await this.ensureConfigPin()
     } catch (error) {
       this.turnActive = false
-      this.ctx.state.fail(error instanceof Error ? error.message : String(error))
+      if (!this.ctx.channel.closed) this.ctx.state.fail(error instanceof Error ? error.message : String(error))
       throw error
     }
-    // A notification-triggered restore or dispose can land while the pin check
-    // awaits the runtime. Do not send a prompt into a cancelled/closed turn.
-    if (!this.turnActive || this.ctx.channel.closed || !this.sessionId) {
+    // A notification-triggered restore, cancel, or dispose can land while the
+    // pin check awaits the runtime. Do not send a prompt into a cancelled or
+    // closed turn.
+    if (!this.turnActive || this.cancelRequested || this.ctx.channel.closed || !this.sessionId) {
       this.turnActive = false
       throw new Error('the ACP turn was cancelled before the prompt was sent')
     }
@@ -154,10 +157,10 @@ export class AcpTransport implements WebSessionTransport {
 
   async abort(): Promise<void> {
     if (!this.sessionId) return
-    // A cancel that lands while prompt() is awaiting the pin restore must be
-    // visible to its post-await check; otherwise it sends session/prompt after
-    // the user already cancelled.
-    this.turnActive = false
+    // Keep turnActive as the single-turn guard; a dedicated flag lets a cancel
+    // that lands during the pin restore suppress the prompt without allowing a
+    // second prompt to start while the cancelled turn is still settling.
+    this.cancelRequested = true
     await this.peer.notify('session/cancel', { sessionId: this.sessionId })
   }
 
@@ -223,6 +226,7 @@ export class AcpTransport implements WebSessionTransport {
     // Invalidate any in-flight prompt settlement before disposing.
     this.turnGeneration += 1
     this.turnActive = false
+    this.cancelRequested = false
     this.cancelPermissions()
     this.peer.dispose(new Error('ACP session stopped'))
   }
@@ -233,6 +237,7 @@ export class AcpTransport implements WebSessionTransport {
     if (generation !== this.turnGeneration) return
     this.turnGeneration += 1
     this.turnActive = false
+    this.cancelRequested = false
     this.cancelPermissions()
     this.flushUser()
     this.builder.endTurn()

@@ -1221,7 +1221,9 @@ function explicitProviderKeys(data: unknown): Record<string, string> {
   const keys = data['providerKeys']
   if (isPlainObject(keys)) {
     for (const [key, value] of Object.entries(keys)) {
-      if (typeof value === 'string') out[key] = value
+      // Keep the explicit-empty clear signal, but ignore a stray whitespace-only
+      // value so it cannot trigger a global-store rewrite.
+      if (typeof value === 'string' && (value === '' || value.trim() !== '')) out[key] = value
     }
   }
   const clears = data['clearProviderKeys']
@@ -1364,20 +1366,6 @@ export async function writeConfigSection(section: ConfigSection, data: unknown, 
     // local save into a 500 with memory and disk out of sync.
     try {
       await writeSecretFileAt(globalProviderKeysFile(), globalKeys)
-      // A tombstone is only needed while the global mirror still has the key.
-      // Once the mirror no longer contains it, drop the tombstone from the
-      // local file so a later global re-add is visible in this checkout.
-      const providerKeys = (validated as { providerKeys?: Record<string, string> }).providerKeys
-      if (providerKeys) {
-        let changed = false
-        for (const [key, value] of Object.entries(providerKeys)) {
-          if (value === '' && globalKeys[key] === undefined) {
-            delete providerKeys[key]
-            changed = true
-          }
-        }
-        if (changed) await writeJsonFile(filename, validated, isSecretConfigFile(filename))
-      }
     } catch (error: unknown) {
       const message = `could not update the global provider-key mirror: ${error instanceof Error ? error.message : String(error)}`
       console.error(message)

@@ -196,7 +196,11 @@ export function configureAutoUpdate(win: BrowserWindow, hooks: AutoUpdateHooks, 
   const reportInstallFailure = async (error: Error): Promise<void> => {
     if (installFailureHandled) return
     installFailureHandled = true
-    sendStatus({ phase: 'error', message: error.message })
+    try {
+      sendStatus({ phase: 'error', message: error.message })
+    } catch (statusError: unknown) {
+      console.warn(`could not send the updater error status: ${statusError instanceof Error ? statusError.message : String(statusError)}`)
+    }
     try {
       await hooks.onInstallFailure?.(error)
     } catch (hookError) {
@@ -331,10 +335,9 @@ export function configureAutoUpdate(win: BrowserWindow, hooks: AutoUpdateHooks, 
       // A queued update-downloaded event can run during the hash and point
       // electron-updater at a different file; on some early-error paths it
       // leaves downloadedVersion unchanged. Reject any new download activity
-      // before touching the installer.
-      // Only activity for this version can change the installer. A background
-      // download for another release must not fail an install after services
-      // have already been stopped.
+      // before touching the installer. This is deliberately conservative:
+      // aborting the install after services stopped is recoverable, while
+      // handing off an installer whose path changed is not.
       const sameVersionDownload = downloadBusy && downloadedVersion === version
       if (downloadGeneration !== generation || sameVersionDownload
         || pendingDownloads.some((download) => download.version === version)) {

@@ -33,7 +33,7 @@ async function readPrivateToken(path: string): Promise<string> {
     throw new Error(`${path} is not owned by the current user; refusing to use it`)
   }
   if (process.platform === 'win32') return (await readFile(path, 'utf8')).trim()
-  const flags = constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0)
+  const flags = constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0)
   const handle = await open(path, flags)
   try {
     const info = await handle.stat()
@@ -212,8 +212,7 @@ async function ensurePrivateMode(path: string, mode: number, kind: 'file' | 'dir
   // chmod(path) follows a symlink; operate on an open descriptor and verify it
   // is the same inode lstat just checked. A path swap after lstat then cannot
   // redirect the chmod/verification to another file.
-  const flags = constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0)
-    | (kind === 'file' ? (constants.O_NONBLOCK ?? 0) : 0)
+  const flags = constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0)
   const handle = await open(path, flags)
   try {
     const opened = await handle.stat()
