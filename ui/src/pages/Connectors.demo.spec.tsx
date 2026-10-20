@@ -658,7 +658,7 @@ describe('Connector demo routes', () => {
     })
     fireEvent.scroll(scrollArea)
 
-    expect(slackNavigation.getAttribute('aria-current')).toBe('location')
+    await waitFor(() => expect(slackNavigation.getAttribute('aria-current')).toBe('location'))
     expect(discordNavigation.hasAttribute('aria-current')).toBe(false)
 
     const scrollIntoView = vi.fn()
@@ -674,7 +674,7 @@ describe('Connector demo routes', () => {
     Object.defineProperty(scrollArea, 'scrollTop', { configurable: true, value: 1_500 })
     fireEvent.scroll(scrollArea)
 
-    expect(feishuNavigation.getAttribute('aria-current')).toBe('location')
+    await waitFor(() => expect(feishuNavigation.getAttribute('aria-current')).toBe('location'))
     expect(slackNavigation.hasAttribute('aria-current')).toBe(false)
   })
 
