@@ -14,6 +14,7 @@ import {
 import { triggerUTARestart } from '../../services/uta-supervisor/restart-trigger.js'
 import { resolveUTAUrl } from '../../services/uta-supervisor/url.js'
 import { resolveLocalToken } from '../../server/local-auth.js'
+import { assertLoopbackForLocalToken } from '@traderalice/uta-protocol'
 import { describeTradingMode } from '../../services/trading-mode.js'
 import {
   INSTALLABLE_BROKER_ENGINES,
@@ -351,6 +352,15 @@ export function createTradingConfigRoutes(ctx: EngineContext) {
     try {
       const body = await c.req.json()
       const token = await resolveLocalToken()
+      // This fetch bypasses the UTA SDK; never attach the token off-loopback.
+      try {
+        assertLoopbackForLocalToken(utaUrl)
+      } catch (error: unknown) {
+        return c.json({
+          success: false,
+          error: error instanceof Error ? error.message : String(error),
+        }, 502)
+      }
       const res = await fetch(`${utaUrl.replace(/\/$/, '')}/api/trading/test-connection`, {
         method: 'POST',
         headers: {
@@ -359,13 +369,42 @@ export function createTradingConfigRoutes(ctx: EngineContext) {
         },
         body: JSON.stringify(body),
       })
-      if (res.status === 401 || res.status === 403) {
+      if (res.status === 401) {
         // Check before parsing: a proxy or UTA may return an empty/text auth
         // rejection body, and res.json() would turn it into a misleading 503.
         return c.json({ success: false, error: 'The local service token was rejected by UTA.' }, 502)
       }
-      const data = await res.json()
-      return c.json(data, res.status as 200 | 400 | 500)
+      // A 403 is not a token failure; it can be an HTML/text rejection page
+      // from a proxy. Read text first so a non-JSON error still surfaces the
+      // upstream status instead of a misleading JSON parse failure (503).
+      const text = await res.text()
+      let data: unknown
+      try {
+        if (!text.trim()) throw new Error('empty response')
+        data = JSON.parse(text)
+      } catch {
+        // A 2xx with HTML/text is a broken gateway response, not success.
+        return c.json({
+          success: false,
+          error: res.ok ? 'UTA returned a non-JSON response' : `UTA returned HTTP ${res.status}`,
+        }, 502)
+      }
+      if (!res.ok) {
+        const message = typeof data === 'object' && data !== null
+          && typeof (data as { error?: unknown }).error === 'string'
+          ? (data as { error: string }).error
+          : `UTA returned HTTP ${res.status}`
+        return c.json({ success: false, error: message }, res.status === 400 ? 400 : 502)
+      }
+      if (
+        typeof data !== 'object'
+        || data === null
+        || Array.isArray(data)
+        || typeof (data as { success?: unknown }).success !== 'boolean'
+      ) {
+        return c.json({ success: false, error: 'UTA returned an unexpected JSON response' }, 502)
+      }
+      return c.json(data as { success: boolean }, 200)
     } catch (err) {
       return c.json({ success: false, error: err instanceof Error ? err.message : String(err) }, 503)
     }

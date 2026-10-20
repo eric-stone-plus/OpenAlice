@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/
 import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { relocateLegacyData } from './relocate-data.js'
+import { moveIfAbsent, relocateLegacyData } from './relocate-data.js'
 
 describe('relocateLegacyData', () => {
   let legacyRoot: string
@@ -69,18 +69,16 @@ describe('relocateLegacyData', () => {
     expect(await readFile(join(legacyRoot, 'data', 'config', 'accounts.json'), 'utf8')).toBe('[{"id":"x"}]')
   })
 
-  it('moves the legacy machine key and provider-key store beside the data', async () => {
+  it('moves the legacy credential and provider-key store beside the data', async () => {
     await seedLegacyStore()
-    await writeFile(join(legacyRoot, 'sealing.key'), 'key-material\n')
     await mkdir(join(legacyRoot, 'state'), { recursive: true })
     await writeFile(join(legacyRoot, 'state', 'sealing.key.cred'), 'cred-material\n')
     await writeFile(join(legacyRoot, 'provider-keys.json'), '{"x":1}\n')
 
     expect(await relocateLegacyData(legacyRoot, newRoot)).toBe('moved')
-    expect(await readFile(join(newRoot, 'sealing.key'), 'utf8')).toBe('key-material\n')
     expect(await readFile(join(newRoot, 'state', 'sealing.key.cred'), 'utf8')).toBe('cred-material\n')
     expect(await readFile(join(newRoot, 'provider-keys.json'), 'utf8')).toBe('{"x":1}\n')
-    expect(existsSync(join(legacyRoot, 'sealing.key'))).toBe(false)
+    expect(existsSync(join(legacyRoot, 'state', 'sealing.key.cred'))).toBe(false)
   })
 
   it('skips sealed data when the destination key differs', async () => {
@@ -171,5 +169,66 @@ describe('relocateLegacyData', () => {
     expect(await relocateLegacyData(legacyRoot, newRoot)).toBe('moved')
     expect(existsSync(join(newRoot, '.data.relocating'))).toBe(false)
     expect(existsSync(join(newRoot, 'data', 'config', 'accounts.json'))).toBe(true)
+  })
+
+  it('refuses to overwrite a destination key with different contents', async () => {
+    const from = join(legacyRoot, 'sealing.key')
+    const to = join(newRoot, 'sealing.key')
+    await writeFile(from, 'legacy-key\n')
+    await writeFile(to, 'different-key\n')
+    await expect(moveIfAbsent(from, to)).rejects.toThrow(/different contents/)
+    expect(await readFile(from, 'utf8')).toBe('legacy-key\n')
+    expect(await readFile(to, 'utf8')).toBe('different-key\n')
+  })
+
+  it('reports an identical destination and removes the legacy copy', async () => {
+    const from = join(legacyRoot, 'sealing.key')
+    const to = join(newRoot, 'sealing.key')
+    await writeFile(from, 'same-key\n')
+    await writeFile(to, 'same-key\n')
+    expect(await moveIfAbsent(from, to)).toBe('identical')
+    expect(existsSync(from)).toBe(false)
+    expect(await readFile(to, 'utf8')).toBe('same-key\n')
+  })
+
+  it('reports an unreadable destination instead of calling it a content conflict', async () => {
+    const from = join(legacyRoot, 'sealing.key')
+    const to = join(newRoot, 'sealing.key')
+    await writeFile(from, 'legacy-key\n')
+    await mkdir(to)
+    await expect(moveIfAbsent(from, to)).rejects.not.toThrow(/different contents/)
+  })
+
+  it('moves the legacy local token into the new home', async () => {
+    await mkdir(join(legacyRoot, 'auth'), { recursive: true })
+    const token = `oa1_${'a'.repeat(43)}\n`
+    await writeFile(join(legacyRoot, 'auth', 'local.token'), token, { mode: 0o600 })
+    expect(await relocateLegacyData(legacyRoot, newRoot)).toBe('moved')
+    expect(await readFile(join(newRoot, 'auth', 'local.token'), 'utf8')).toBe(token)
+    expect(existsSync(join(legacyRoot, 'auth', 'local.token'))).toBe(false)
+  })
+
+  it('does not move a live sealing-key claim or the sealed data', async () => {
+    await seedLegacyStore()
+    await writeFile(join(legacyRoot, 'sealing.key'), `openalice-sealing-claim ${process.pid}\n`, { mode: 0o600 })
+    const warnings: string[] = []
+    expect(await relocateLegacyData(legacyRoot, newRoot, (message) => warnings.push(message))).toBe('skipped')
+    expect(existsSync(join(legacyRoot, 'sealing.key'))).toBe(true)
+    expect(existsSync(join(newRoot, 'sealing.key'))).toBe(false)
+    expect(existsSync(join(legacyRoot, 'data', 'config', 'accounts.json'))).toBe(true)
+    expect(existsSync(join(legacyRoot, 'KEY-NOT-MOVED.txt'))).toBe(true)
+    expect(warnings.join('\n')).toMatch(/KEY-NOT-MOVED/)
+  })
+
+  it('downgrades a provider-key race to a visible marker', async () => {
+    await seedLegacyStore()
+    await writeFile(join(legacyRoot, 'sealing.key'), `${Buffer.alloc(32, 5).toString('base64')}\n`)
+    await writeFile(join(legacyRoot, 'provider-keys.json'), '{"legacy":1}\n')
+    await writeFile(join(newRoot, 'provider-keys.json'), '{"destination":1}\n')
+
+    expect(await relocateLegacyData(legacyRoot, newRoot)).toBe('moved')
+    expect(existsSync(join(legacyRoot, 'PROVIDER-KEYS-NOT-MOVED.txt'))).toBe(true)
+    expect(await readFile(join(legacyRoot, 'provider-keys.json'), 'utf8')).toBe('{"legacy":1}\n')
+    expect(await readFile(join(newRoot, 'provider-keys.json'), 'utf8')).toBe('{"destination":1}\n')
   })
 })

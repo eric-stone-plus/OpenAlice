@@ -2,6 +2,7 @@ import { constants } from 'node:fs'
 import { readFile, access } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
+import { localTokenPath } from '@traderalice/sealing-key'
 import { resolveStoredLaunchContext } from './supervisor-config.ts'
 import { isBunStandalone } from './bun-standalone.mjs'
 
@@ -39,7 +40,7 @@ export async function runProjectCli(argv: string[]): Promise<number> {
   if (!endpoint.url) throw new Error('Project CLI endpoint has no URL')
   if (!endpoint.socket) {
     const url = new URL(endpoint.url)
-    if (url.protocol !== 'http:' || !['127.0.0.1', '[::1]', 'localhost'].includes(url.hostname) || url.username || url.password) throw new Error('Project CLI endpoint must use local HTTP')
+    if ((url.protocol !== 'http:' && url.protocol !== 'https:') || !['127.0.0.1', '[::1]', 'localhost'].includes(url.hostname) || url.username || url.password) throw new Error('Project CLI endpoint must use local HTTP or HTTPS')
   }
   env.OPENALICE_PROJECT_ID = context.aliceProject.id
   env.OPENALICE_HOME = context.home
@@ -47,10 +48,11 @@ export async function runProjectCli(argv: string[]): Promise<number> {
   // Never let an inherited token from another home shadow the selected
   // project's token file; the CLI prefers the inline token.
   delete env.OPENALICE_LOCAL_TOKEN
-  env.OPENALICE_LOCAL_TOKEN_FILE = join(context.home, 'auth', 'local.token')
+  env.OPENALICE_LOCAL_TOKEN_FILE = localTokenPath(context.home)
   try {
     await access(env.OPENALICE_LOCAL_TOKEN_FILE, constants.R_OK)
-  } catch {
+  } catch (error: unknown) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
     throw new Error(
       `No local auth token in ${context.home}. Start or restart this Project with the updated OpenAlice Runtime.`,
     )

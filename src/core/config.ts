@@ -10,18 +10,10 @@ import {
   hasSealedMarker,
   seal,
   unseal,
-  SealingBackendUnavailableError,
-  SealingKeyConflictError,
-  SealingKeyMissingError,
 } from './sealing.js'
 import { globalProviderKeysFile, isSecretConfigFile } from './secret-files.js'
 import { preserveSecretFields } from './redaction.js'
-
-function isSealingStoreError(error: unknown): boolean {
-  return error instanceof SealingKeyMissingError
-    || error instanceof SealingBackendUnavailableError
-    || error instanceof SealingKeyConflictError
-}
+import { isSealingStoreError } from '@traderalice/sealing-key'
 
 const CONFIG_DIR = dataPath('config')
 
@@ -140,15 +132,28 @@ async function writeJsonFile(filename: string, value: unknown, secret = false): 
 // wins. Broker credentials deliberately stay instance-local: data/ next to
 // the source tree is the audit boundary for anything money-capable.
 
-async function readGlobalProviderKeys(): Promise<Record<string, string>> {
+async function readGlobalProviderKeys(strict = false): Promise<Record<string, string>> {
   try {
-    const raw = await readSecretFileAt(globalProviderKeysFile())
-    if (typeof raw !== 'object' || raw === null) return {}
+    // The write path must not use the quarantining reader: it renames an
+    // unreadable sealed file aside and returns undefined, after which the
+    // mirror would write a fresh file over the original path. The strict
+    // reader throws instead, so the settings write path refuses to save.
+    const path = globalProviderKeysFile()
+    const raw = strict ? await readSecretFileAtStrict(path) : await readSecretFileAt(path)
+    if (raw === undefined) return {}
+    if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+      if (strict) throw new Error(`${path} must contain a JSON object`)
+      return {}
+    }
     return Object.fromEntries(
       Object.entries(raw).filter(([, v]) => typeof v === 'string' && v !== ''),
     ) as Record<string, string>
-  } catch {
-    return {}
+  } catch (error: unknown) {
+    // Reading degrades a missing/corrupt/unreadable file to an empty store so
+    // the app still boots. Writing must not: a strict read refuses to
+    // overwrite a corrupt file and lose the previous keys.
+    if (!strict) return {}
+    throw error
   }
 }
 
@@ -157,22 +162,35 @@ async function applyGlobalProviderKeys<T extends { providerKeys: object }>(parse
   const keys = parsed.providerKeys as Record<string, string | undefined>
   const global = await readGlobalProviderKeys()
   for (const [k, v] of Object.entries(global)) {
-    if (!keys[k]) keys[k] = v
+    // An explicit empty string is a tombstone that blocks a stale global key
+    // from resurrecting after a failed mirror write.
+    if (keys[k] === undefined) keys[k] = v
   }
+  // The tombstone stays on disk to suppress the stale global entry, but it is
+  // not a usable key; keep the in-memory view free of empty values.
+  for (const [k, v] of Object.entries(keys)) if (v === '') delete keys[k]
   return parsed
 }
 
-/** Mirror a Settings save back to the user-global file so every future
- *  checkout starts with the keys. An EXPLICIT empty string clears the key
- *  globally too — otherwise a deleted key resurrects in each new worktree;
- *  keys absent from the payload are left untouched. */
-async function mirrorProviderKeysToGlobal(keys: Record<string, string | undefined>): Promise<void> {
-  const global = await readGlobalProviderKeys()
+/** Prepare the user-global file for a Settings save so every future checkout
+ *  starts with the keys. An EXPLICIT empty string clears the key globally too
+ *  — otherwise a deleted key resurrects in each new worktree; keys absent from
+ *  the payload are left untouched. The caller writes the returned object only
+ *  after the local section has been validated and written. */
+async function prepareGlobalProviderKeys(keys: Record<string, string | undefined>): Promise<Record<string, string>> {
+  let global: Record<string, string>
+  try {
+    global = await readGlobalProviderKeys(true)
+  } catch (error: unknown) {
+    throw new Error(
+      `refusing to overwrite the user-global provider-key store: ${error instanceof Error ? error.message : String(error)}`,
+    )
+  }
   for (const [k, v] of Object.entries(keys)) {
     if (typeof v === 'string' && v.trim() !== '') global[k] = v
     else if (v === '') delete global[k]
   }
-  await writeSecretFileAt(globalProviderKeysFile(), global)
+  return global
 }
 
 // ==================== Individual Schemas ====================
@@ -1199,7 +1217,7 @@ function explicitProviderKeys(data: unknown): Record<string, string> {
   const keys = data['providerKeys']
   if (isPlainObject(keys)) {
     for (const [key, value] of Object.entries(keys)) {
-      if (typeof value === 'string') out[key] = value
+      if (typeof value === 'string') out[key] = value.trim() === '' ? '' : value
     }
   }
   const clears = data['clearProviderKeys']
@@ -1230,13 +1248,13 @@ function mergeMarketDataInput(existing: Record<string, unknown>, incoming: unkno
       // absent keys are preserved so a redacted GET→PUT echo cannot wipe the
       // whole map.
       if (typeof value !== 'string') continue
-      if (value.trim() === '') delete merged[key]
+      if (value.trim() === '') merged[key] = ''
       else merged[key] = value
     }
   }
   const clears = input['clearProviderKeys']
   if (Array.isArray(clears)) {
-    for (const key of clears) if (typeof key === 'string') delete merged[key]
+    for (const key of clears) if (typeof key === 'string') merged[key] = ''
   }
   delete input['clearProviderKeys']
   // A partial section edit (e.g. the hub URL) must not reset the rest to
@@ -1311,7 +1329,7 @@ function mergeAIProviderInput(existing: Record<string, unknown>, incoming: unkno
 }
 
 /** Validate and write a config section to disk. Returns the validated config. */
-export async function writeConfigSection(section: ConfigSection, data: unknown): Promise<unknown> {
+export async function writeConfigSection(section: ConfigSection, data: unknown, warnings?: string[]): Promise<unknown> {
   const schema = sectionSchemas[section]
   let input = data
   if (section === 'marketData' || section === 'crypto' || section === 'securities' || section === 'aiProvider') {
@@ -1324,10 +1342,26 @@ export async function writeConfigSection(section: ConfigSection, data: unknown):
   }
   const validated = schema.parse(input)
   const filename = sectionFiles[section]
-  await writeJsonFile(filename, validated, isSecretConfigFile(filename))
+  // Resolve the global-key store before writing the local section: a corrupt
+  // or unreadable global file must abort the save before any half of the
+  // two-store update is persisted.
+  let globalKeys: Record<string, string> | null = null
   if (section === 'marketData') {
     const keys = explicitProviderKeys(data)
-    if (Object.keys(keys).length) await mirrorProviderKeysToGlobal(keys)
+    if (Object.keys(keys).length) globalKeys = await prepareGlobalProviderKeys(keys)
+  }
+  await writeJsonFile(filename, validated, isSecretConfigFile(filename))
+  if (globalKeys) {
+    // The local store is authoritative; the global mirror is for tools that
+    // read ~/.openalice directly. A mirror failure must not turn a successful
+    // local save into a 500 with memory and disk out of sync.
+    try {
+      await writeSecretFileAt(globalProviderKeysFile(), globalKeys)
+    } catch (error: unknown) {
+      const message = `could not update the global provider-key mirror: ${error instanceof Error ? error.message : String(error)}`
+      console.error(message)
+      warnings?.push(message)
+    }
   }
   return validated
 }

@@ -2,6 +2,12 @@
 # file. Default gitleaks rules cover provider tokens (OpenAI, Anthropic, AWS,
 # GitHub, private keys); the custom rules catch generic broker assignments
 # whose vendor format is not distinctive enough for a built-in rule.
+#
+# Requires gitleaks >= 8.21.2. The global allowlist uses the singular
+# `[allowlist]` table understood by that version; older binaries ignore it and
+# report every synthetic fixture. CI pins 8.21.2 with a release-asset digest,
+# and .githooks/pre-commit refuses an older local binary. Exact historical
+# findings live in .gitleaksignore so they never become path-wide exemptions.
 title = "OpenAlice"
 
 [extend]
@@ -30,10 +36,10 @@ tags = ["credential", "openalice"]
 [allowlist]
 description = "Synthetic fixtures and placeholder env files"
 paths = [
-  # Generated packaging output (gitignored): app.asar bundles dependencies
-  # whose minified fixtures match entropy rules. Source files are still
-  # scanned; regenerate the package before scanning it as an artifact.
-  '''(^|/)dist/''',
+  # One generated, gitignored packaged artifact bundles dependencies whose
+  # minified fixtures match entropy rules. The primary `gitleaks git` scan
+  # covers source and history; do not allowlist all of `dist/`.
+  '''^dist/electron-app(-pet)?/.*\.asar$''',
   '''(^|/)\.env\.(?:example|sample|template)$''',
   # Vendored xterm patches contain minified data that matches the
   # generic-api-key entropy heuristic but is not a credential.
@@ -72,11 +78,15 @@ regexes = [
   '''synthetic-ai-transfer-secret''',
   '''synthetic-broker-transfer-key''',
   '''synthetic-broker-transfer-secret''',
+  '''synthetic-private-key-material-not-a-secret''',
   '''super-secret-password-value''',
   # Synthetic values in redaction and broker-preset specs. Exact matches only;
   # the files themselves stay in scope for real credentials.
-  '''MIIEvQIBADANBgkqhkiG9w0BAQEFAASC''',
   '''live-api-key-1234''',
   '''live-secret-5678''',
   '''0xnotvalidkey''',
+  # Eastmoney's public fixed search token (not a credential). The current
+  # source carries an inline gitleaks:allow; history scans still see the
+  # commit before that comment was added.
+  '''D43BF722C8E33BDC906FB84D85E326E8''',
 ]

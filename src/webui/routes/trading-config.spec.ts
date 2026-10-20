@@ -25,6 +25,10 @@ vi.mock('../../services/uta-supervisor/restart-trigger.js', () => ({
   triggerUTARestart: brokerPackMocks.triggerUTARestart,
 }))
 
+vi.mock('../../server/local-auth.js', () => ({
+  resolveLocalToken: vi.fn(async () => 'oa1_test'),
+}))
+
 // Mock readUTAsConfig / writeUTAsConfig with in-memory store BEFORE importing the route.
 let utaStore: unknown[] = []
 let keylessDataSources: string[] = []
@@ -46,6 +50,7 @@ import { deriveUtaId, OKX_PRESET, SIMULATOR_PRESET } from '@traderalice/uta-prot
 
 function makeRoutes() {
   const ctx = {
+    tradingModePolicy: () => ({ mode: 'live' }),
     utaManager: {
       get: vi.fn(),
       resolve: () => [],
@@ -404,6 +409,23 @@ describe('PUT /uta/:id — edit-only', () => {
     // Rotation actually landed in the store, unmasked.
     const stored = (utaStore[0] as { presetConfig: Record<string, string> }).presetConfig
     expect(stored.apiKey).toBe('new-key-9999')
+  })
+})
+
+// ==================== Test Connection BFF ====================
+
+describe('POST /test-connection', () => {
+  it('returns 502 when UTA returns a non-JSON 2xx body', async () => {
+    const routes = makeRoutes()
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('<html>not json</html>', { status: 200 })))
+    try {
+      const result = await req(routes, 'POST', '/test-connection', {})
+      expect(result.status).toBe(502)
+      expect(result.body).toMatchObject({ success: false })
+      expect((result.body as { error: string }).error).toMatch(/non-JSON/)
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 })
 

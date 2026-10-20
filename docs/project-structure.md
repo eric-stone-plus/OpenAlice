@@ -428,6 +428,11 @@ Workspaces, locks, credentials, sealing, and Broker Packs must remain coherent.
 └── sealing.key                legacy plaintext fallback; not in data/
 ```
 
+`auth/local.token` is read by in-process MCP/CLI clients. An out-of-process
+MCP client that expands `${OPENALICE_LOCAL_TOKEN}` must read that 0600 file and
+export the value into its own environment; OpenAlice does not put the token in
+the host environment.
+
 Overrides:
 
 - `AQ_LAUNCHER_ROOT` moves only the Workspace launcher root.

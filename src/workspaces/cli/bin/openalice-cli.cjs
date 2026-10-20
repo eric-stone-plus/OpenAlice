@@ -182,7 +182,8 @@ function isLocalToolUrl(url) {
   if (url.startsWith('/')) return true
   try {
     const parsed = new URL(url)
-    return parsed.protocol === 'http:' && ['127.0.0.1', '[::1]', 'localhost'].includes(parsed.hostname)
+    return (parsed.protocol === 'http:' || parsed.protocol === 'https:')
+      && ['127.0.0.1', '[::1]', 'localhost'].includes(parsed.hostname)
   } catch {
     return false
   }

@@ -17,6 +17,7 @@ import { probeOptionalCarrier } from '../../services/optional-carrier/health.js'
 import { describeTradingMode, type TradingModePolicy } from '../../services/trading-mode.js'
 import { decodeUTAHealth } from '../../services/uta-supervisor/health.js'
 import { resolveLocalToken } from '../../server/local-auth.js'
+import { assertLoopbackForLocalToken } from '@traderalice/uta-protocol'
 
 // Total request timeout. UTA is on the loopback interface so connect is
 // instant — this guards against handlers that legitimately take seconds
@@ -73,6 +74,25 @@ export function createTradingProxyRoutes(opts: {
         envLocked: policy.envLocked,
         hasUTAConfig: policy.hasUTAConfig,
         hint: 'Trading service is not configured.',
+      })
+    }
+
+    // Every proxied call refuses a non-loopback UTA URL because it carries the
+    // local bearer token. The status probe must agree, otherwise the UI shows
+    // trading as available while every action fails.
+    try {
+      assertLoopbackForLocalToken(base)
+    } catch (error: unknown) {
+      return c.json({
+        available: false,
+        state: 'unavailable',
+        reason: 'not_loopback',
+        detail: error instanceof Error ? error.message : String(error),
+        mode: policy.mode,
+        modeSource: policy.source,
+        envLocked: policy.envLocked,
+        hasUTAConfig: policy.hasUTAConfig,
+        hint: 'Trading service URL must be loopback because requests carry the local auth token.',
       })
     }
 
@@ -136,6 +156,17 @@ export function createTradingProxyRoutes(opts: {
         hint: 'Trading service is not reachable. Alice is running in lite mode.',
       }, 503)
     }
+    // The forwarded request carries the local bearer token. Refuse a
+    // non-loopback UTA URL here as well as in the SDK; this route builds its
+    // own fetch and would otherwise bypass the SDK guard.
+    try {
+      assertLoopbackForLocalToken(base)
+    } catch (error: unknown) {
+      return c.json({
+        error: 'UTA URL is not loopback',
+        detail: error instanceof Error ? error.message : String(error),
+      }, 502)
+    }
     const incoming = c.req.raw
     // Reconstruct target URL: Hono's `c.req.path` is the *full* path
     // including the mount prefix (`/api/trading/uta`, not `/uta`), so
@@ -177,7 +208,7 @@ export function createTradingProxyRoutes(opts: {
       clearTimeout(connectTimer)
     }
 
-    if (upstream.status === 401 || upstream.status === 403) {
+    if (upstream.status === 401) {
       // The browser's Alice session is already authenticated by the web
       // middleware. A UTA 401 here means the server-to-server local token is
       // stale or missing; do not forward it as if the user's session expired.

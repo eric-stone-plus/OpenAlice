@@ -1,12 +1,22 @@
 import { selectRelease, releaseChannelForVersion, type ReleaseDecision, type ClientReleaseObservation, type NativeUpdaterStatus as UpdaterStatus, type UpdaterInstallStage } from '@traderalice/update-lifecycle'
 export type { UpdaterInstallStage } from '@traderalice/update-lifecycle'
+import { statSync } from 'node:fs'
 import { appendFile, chmod, mkdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { app, ipcMain, net, shell, type BrowserWindow } from 'electron'
 import electronUpdater from 'electron-updater'
 import { resolveAutoUpdateCapability, type AutoUpdateCapability } from './auto-update-policy.js'
 import { fetchVerifiedLinuxManifest } from './update-feed.js'
-import { verifyDownloadedPackage, type LinuxUpdateManifest } from './update-manifest.js'
+import {
+  assertManifestCurrent,
+  assertPackageIdentity,
+  packageIdentityFromStats,
+  samePackageIdentity,
+  verifyDownloadedPackage,
+  verifyDownloadedPackageWithIdentity,
+  type LinuxUpdateManifest,
+  type VerifiedPackageIdentity,
+} from './update-manifest.js'
 import { LINUX_SIGNED_UPDATE_FEED, OPENALICE_APP_ID } from './update-signing-keys.js'
 
 const { autoUpdater } = electronUpdater
@@ -54,6 +64,9 @@ export function configureAutoUpdate(win: BrowserWindow, hooks: AutoUpdateHooks, 
   let missingFeed = false
   let releaseAccept: Promise<void> = Promise.resolve()
   let downloadBusy = false
+  // Bumped whenever a download event starts processing. A queued event that
+  // lands during the final hash changes this, so the handoff can reject it.
+  let downloadGeneration = 0
   const pendingDownloads: Array<{ version: string; downloadedFile: string }> = []
   // A check can overlap a download: key verified state by version instead of
   // replacing one shared manifest, and keep the exact file that was hashed.
@@ -64,6 +77,19 @@ export function configureAutoUpdate(win: BrowserWindow, hooks: AutoUpdateHooks, 
   // Electron's type surface has no `cache` key; on Linux the updater cache is
   // under XDG_CACHE_HOME (default ~/.cache).
   const updateCacheRoot = (): string => process.env['XDG_CACHE_HOME']?.trim() || join(app.getPath('home'), '.cache')
+  // electron-updater installs `installerPath`, not the path we hashed. The
+  // getter exists on the Linux updater subclasses; treat a missing value as a
+  // failure to confirm rather than guessing.
+  const currentInstallerPath = (): string | null => {
+    // LinuxUpdater's installerPath getter shell-escapes the path before the
+    // install command, so it is not necessarily a filesystem path. The update
+    // helper keeps the raw downloaded file; prefer it.
+    const raw = (autoUpdater as unknown as { downloadedUpdateHelper?: { file?: unknown } })
+      .downloadedUpdateHelper?.file
+    if (typeof raw === 'string' && raw.length > 0) return raw
+    const value = (autoUpdater as unknown as { installerPath?: unknown }).installerPath
+    return typeof value === 'string' && value.length > 0 ? value : null
+  }
 
   const readUpdateSequence = async (): Promise<number> => {
     let raw: string
@@ -78,22 +104,42 @@ export function configureAutoUpdate(win: BrowserWindow, hooks: AutoUpdateHooks, 
     // The file is append-only: one JSON object per line. The max is the
     // high-water mark, so two instances cannot lose an update by racing a
     // read-modify-write. Older single-object files still parse as one line.
-    let highWater = 0
-    let valid = false
-    for (const line of raw.split('\n')) {
-      if (!line.trim()) continue
+    const parseSequence = (line: string): number | null => {
       try {
         const parsed = JSON.parse(line) as { sequence?: unknown }
         if (typeof parsed.sequence === 'number' && Number.isSafeInteger(parsed.sequence) && parsed.sequence > 0) {
-          highWater = Math.max(highWater, parsed.sequence)
-          valid = true
+          return parsed.sequence
         }
       } catch {
-        // Ignore one damaged line; a later valid line still advances the mark.
+        // Reported by the caller as a damaged final record.
       }
+      return null
     }
-    if (!valid && raw.trim() !== '') {
-      throw new Error('could not read the update sequence: the file has no valid sequence')
+    const lines = raw.split('\n').filter((line) => line.trim() !== '')
+    let highWater = 0
+    for (const line of lines) {
+      const sequence = parseSequence(line)
+      if (sequence !== null) highWater = Math.max(highWater, sequence)
+    }
+    // A crash/ENOSPC can leave a partial append after a valid line. The
+    // high-water mark is the max over complete records, so dropping an
+    // incomplete tail cannot lower it or enable a replay. With no complete
+    // record at all there is nothing to preserve, so fail closed and name the
+    // file (the next persist would otherwise stay stuck forever).
+    const last = lines.at(-1)
+    if (last !== undefined && parseSequence(last) === null) {
+      if (lines.length === 1) {
+        throw new Error(
+          `could not read the update sequence at ${updateSequencePath()}: ` +
+          'the file has no complete record; delete it to reset the local replay guard ' +
+          '(this also clears the rollback high-water mark)',
+        )
+      }
+      // highWater already ignored the incomplete tail; keep the lines for the
+      // all-invalid check below.
+    }
+    if (lines.length > 0 && highWater === 0) {
+      throw new Error(`could not read the update sequence at ${updateSequencePath()}: the file has no valid sequence`)
     }
     return highWater
   }
@@ -212,16 +258,33 @@ export function configureAutoUpdate(win: BrowserWindow, hooks: AutoUpdateHooks, 
       releaseNotesUrl: manifest?.releaseNotesUrl ?? releaseUrlFor(checkedRelease.version) }
   } }
 
-  const verifyReadyPackage = async (version: string): Promise<void> => {
-    if (!signedFeed) return
+  const verifyReadyPackage = async (version: string): Promise<VerifiedPackageIdentity | null> => {
+    if (!signedFeed) return null
     const manifest = verifiedManifests.get(version)
     const file = downloadedFiles.get(version)
     if (!manifest || manifest.version !== version || !file) {
       throw new Error('The downloaded update has no verified signed manifest for this version.')
     }
+    // The high-water mark and validity window were checked when the manifest
+    // was fetched; another instance can advance the sequence or the window can
+    // expire while this one downloads. Re-check both before hashing.
+    const highWater = await readUpdateSequence()
+    if (manifest.sequence < highWater) {
+      throw new Error('The signed update manifest replayed an older release sequence.')
+    }
+    assertManifestCurrent(manifest)
     // Re-hash immediately before the handoff: the updater cache is writable
     // by the same user, and quitAndInstall runs the package as root on Linux.
-    await verifyDownloadedPackage(manifest, file, updateCacheRoot())
+    const identity = await verifyDownloadedPackageWithIdentity(manifest, file, updateCacheRoot())
+    // The hash can take seconds for a 2 GiB package. Another instance can
+    // advance the high-water mark or the manifest can expire during it, so
+    // re-check both after the hash and keep the guard adjacent to the handoff.
+    const afterHash = await readUpdateSequence()
+    if (manifest.sequence < afterHash) {
+      throw new Error('The signed update manifest replayed an older release sequence.')
+    }
+    assertManifestCurrent(manifest)
+    return identity
   }
 
   const install = async (expectedVersion?: string, parentOperationId?: string) => {
@@ -231,31 +294,71 @@ export function configureAutoUpdate(win: BrowserWindow, hooks: AutoUpdateHooks, 
     if ((latestStatus?.phase === 'error' && !installFailureHandled) || select(version).status !== 'available') throw new Error('The downloaded release is not eligible for installation. Check updates again.')
     if (installInProgress) return { ok: true }
     installInProgress = true
-    try {
-      await verifyReadyPackage(version)
-    } catch (error) {
-      installInProgress = false
-      throw error
-    }
     installFailureHandled = false
+    let prepareStarted = false
+    let handoffStarted = false
     try {
+      const generation = downloadGeneration
+      await verifyReadyPackage(version)
+      // A queued update-downloaded event can land while the package is being
+      // re-hashed; do not stop services for a payload that changed underneath.
+      // The generation catches an event whose early-error path leaves
+      // downloadedVersion unchanged.
+      if (downloadGeneration !== generation || downloadBusy || pendingDownloads.length > 0
+        || downloadedVersion !== version || select(version).status !== 'available') {
+        throw new Error('The downloaded update changed before installation; review the current release before installing')
+      }
       sendStatus({ phase: 'installing', version, stage: 'preparing' })
       // Give the renderer one paint before managed services begin shutting
       // down. Without this yield the last visible frame is still the button.
       await new Promise((resolve) => setTimeout(resolve, 150))
       const prepare = async () => {
+      prepareStarted = true
       await hooks.beforeInstall(version, (stage) => {
         sendStatus({ phase: 'installing', version, stage })
       })
       }
       const handoff = async () => {
+      handoffStarted = true
       if (downloadedVersion !== version || select(version).status !== 'available') throw new Error('The downloaded update changed before handoff; review the current release before installing')
       sendStatus({ phase: 'installing', version, stage: 'handing-off' })
       await hooks.onInstallHandoff?.(version)
       // Assisted NSIS updates must be silent or they stop on the installer UI
       // after Electron exits. Force-run restarts the updated app on success.
       if (downloadedVersion !== version) throw new Error('The approved native payload changed during handoff')
-      await verifyReadyPackage(version)
+      const generation = downloadGeneration
+      const verified = await verifyReadyPackage(version)
+      // A queued update-downloaded event can run during the hash and point
+      // electron-updater at a different file; on some early-error paths it
+      // leaves downloadedVersion unchanged. Reject any new download activity
+      // before touching the installer.
+      if (downloadGeneration !== generation || downloadBusy || pendingDownloads.length > 0) {
+        throw new Error('The native installer payload changed during handoff')
+      }
+      if (downloadedVersion !== version) throw new Error('The approved native payload changed during handoff')
+      if (verified) {
+        const file = downloadedFiles.get(version)
+        if (!file) throw new Error('The downloaded update disappeared before handoff.')
+        // Synchronous identity check with no event-loop turn between it and the
+        // handoff. The installer still re-opens the path after Electron exits,
+        // so a same-UID racer with write access to the cache keeps a residual
+        // window through shutdown, not just one tick.
+        assertPackageIdentity(verified, file)
+        // quitAndInstall installs electron-updater's internal installerPath,
+        // not the path in downloadedFiles. Prove that path still names the
+        // inode whose bytes we just hashed.
+        const installerPath = currentInstallerPath()
+        if (!installerPath) throw new Error('The native installer did not expose its downloaded payload')
+        let installerIdentity: VerifiedPackageIdentity
+        try {
+          installerIdentity = packageIdentityFromStats(statSync(installerPath))
+        } catch {
+          throw new Error('The native installer payload disappeared before handoff')
+        }
+        if (!samePackageIdentity(verified, installerIdentity)) {
+          throw new Error('The native installer payload does not match the verified package')
+        }
+      }
       autoUpdater.quitAndInstall(true, true)
       }
       if (hooks.executeInstall) await hooks.executeInstall(version, prepare, handoff, parentOperationId)
@@ -263,7 +366,15 @@ export function configureAutoUpdate(win: BrowserWindow, hooks: AutoUpdateHooks, 
       return { ok: true }
     } catch (error) {
       const normalized = error instanceof Error ? error : new Error(String(error))
-      await reportInstallFailure(normalized)
+      // Pre-flight rejections still need an error status so the renderer leaves
+      // the installing phase; only the installer-failure recovery hook is skipped.
+      if (prepareStarted || handoffStarted) await reportInstallFailure(normalized)
+      else {
+        // A pre-flight failure is retryable; only the installer-failure
+        // recovery hook is skipped, not the eligibility guard.
+        installFailureHandled = true
+        sendStatus({ phase: 'error', message: normalized.message })
+      }
       installInProgress = false
       throw normalized
     }
@@ -415,6 +526,7 @@ export function configureAutoUpdate(win: BrowserWindow, hooks: AutoUpdateHooks, 
     })
   }
   const runDownload = async (info: { version: string; downloadedFile: string }): Promise<void> => {
+    downloadGeneration += 1
     downloadBusy = true
     try {
       await handleDownloaded(info)

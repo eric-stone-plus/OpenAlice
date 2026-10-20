@@ -5,8 +5,31 @@
 if ! command -v gitleaks >/dev/null 2>&1; then
   exit 0
 fi
-# Current gitleaks uses `git --staged`; fall back for older installations.
-if gitleaks git --help >/dev/null 2>&1; then
-  exec gitleaks git --staged --config .gitleaks.toml --redact --no-banner
+# The singular `[allowlist]` table and the `.gitleaksignore` fingerprints are
+# only applied consistently by gitleaks >= 8.21.2; older binaries report every
+# synthetic fixture. Refuse an older binary rather than scanning with different
+# semantics than CI.
+version=$(gitleaks version 2>/dev/null | head -n 1 | sed 's/^v\([0-9]\)/\1/')
+case "$version" in
+  [0-9]*.[0-9]*.[0-9]*) ;;
+  *)
+    echo "gitleaks >= 8.21.2 is required for .gitleaks.toml (found '${version:-unknown}'; update gitleaks or commit with --no-verify)" >&2
+    exit 1
+    ;;
+esac
+# `sort -V` is GNU-only; BSD/BusyBox sort reject it and would make this check
+# fail for every commit. Compare the numeric fields portably.
+if ! printf '%s\n' "$version" | awk -F. '
+  BEGIN { req[1] = 8; req[2] = 21; req[3] = 2 }
+  {
+    for (i = 1; i <= 3; i++) {
+      if (($i + 0) > (req[i] + 0)) exit 0
+      if (($i + 0) < (req[i] + 0)) exit 1
+    }
+    exit 0
+  }'
+then
+  echo "gitleaks >= 8.21.2 is required for .gitleaks.toml (found '${version:-unknown}'; update gitleaks or commit with --no-verify)" >&2
+  exit 1
 fi
-exec gitleaks protect --staged --config .gitleaks.toml --redact --no-banner
+exec gitleaks git --staged --config .gitleaks.toml --redact --no-banner

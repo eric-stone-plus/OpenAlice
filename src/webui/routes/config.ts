@@ -225,7 +225,10 @@ export function createConfigRoutes(opts?: ConfigRouteOpts) {
       // The workspace credential modal still sends agent/wireShape instead of
       // a vendor; infer it here so the canonical route can absorb that caller
       // without keeping the legacy workspace-scoped write endpoint.
-      const vendorParse = credentialVendorEnum.safeParse(body.vendor ?? inferCredentialVendor({
+      const vendorInput = typeof body.vendor === 'string' && body.vendor.trim() !== ''
+        ? body.vendor.trim()
+        : undefined
+      const vendorParse = credentialVendorEnum.safeParse(vendorInput ?? inferCredentialVendor({
         ...(body.agent ? { agent: body.agent } : {}),
         ...(baseUrl ? { baseUrl } : {}),
         ...(wireParse.success ? { wireShape: wireParse.data } : {}),
@@ -481,7 +484,11 @@ export function createConfigRoutes(opts?: ConfigRouteOpts) {
         return c.json({ error: `Invalid section "${section}". Valid: ${validSections.join(', ')}` }, 400)
       }
       const body = await c.req.json()
-      const validated = await writeConfigSection(section, body)
+      // Only marketData has a global provider-key mirror that can warn.
+      const warnings: string[] = []
+      const validated = section === 'marketData'
+        ? await writeConfigSection(section, body, warnings)
+        : await writeConfigSection(section, body)
       // Keep the in-memory ctx.config in sync with disk so any code path
       // reading it (provider resolver, market-data helpers, …) picks up
       // edits without a restart. Object.assign preserves ctx.config's
@@ -500,8 +507,10 @@ export function createConfigRoutes(opts?: ConfigRouteOpts) {
       // marketData edits are picked up lazily by the provider resolver
       // (it reads ctx.config per request), so no explicit hot-reload hook
       // is needed. Connector Service owns its own restart flag and API.
-      // Never echo the submitted secrets back, even on the write path.
-      return c.json(redactConfigSection(section, validated))
+      // Never echo the submitted secrets back, even on the write path. A
+      // best-effort global-mirror failure is surfaced alongside the result.
+      const redacted = redactConfigSection(section, validated) as Record<string, unknown>
+      return c.json(warnings.length > 0 ? { ...redacted, warnings } : redacted)
     } catch (err) {
       if (err instanceof Error && err.name === 'ZodError') {
         return c.json({ error: 'Validation failed', details: JSON.parse(err.message) }, 400)

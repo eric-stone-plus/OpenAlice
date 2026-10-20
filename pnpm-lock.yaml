@@ -99,7 +99,7 @@ importers:
         specifier: 3.2.2
         version: 3.2.2
       electron-updater:
-        specifier: ^6.8.9
+        specifier: 6.8.9
         version: 6.8.9
       hono:
         specifier: ^4.12.32
@@ -220,7 +220,7 @@ importers:
         specifier: ^26.0.0
         version: 26.15.2(dmg-builder@26.15.2)
       electron-updater:
-        specifier: ^6.8.9
+        specifier: 6.8.9
         version: 6.8.9
 
   packages/cli:
@@ -533,6 +533,9 @@ importers:
       '@traderalice/connector-protocol':
         specifier: workspace:*
         version: link:../../packages/connector-protocol
+      '@traderalice/sealing-key':
+        specifier: workspace:*
+        version: link:../../packages/sealing-key
       axios:
         specifier: ^1.19.0
         version: 1.19.0

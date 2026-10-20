@@ -59,7 +59,7 @@ async function hasPersistedUTAs(userDataHome: string, env: NodeJS.ProcessEnv): P
       'accounts.json',
     ), 'utf8'))
     const accounts = hasSealedMarker(raw)
-      ? await unsealAt(userDataHome, raw, env)
+      ? await unsealAt(userDataHome, raw, env, { migrate: false })
       : raw
     return Array.isArray(accounts) && accounts.length > 0
   } catch (error: unknown) {

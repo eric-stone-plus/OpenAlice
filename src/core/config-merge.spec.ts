@@ -10,6 +10,7 @@ import { join } from 'node:path'
 let home: string
 let savedHome: string | undefined
 let savedBackend: string | undefined
+let savedGlobal: string | undefined
 
 async function loadConfig() {
   vi.resetModules()
@@ -21,7 +22,12 @@ async function loadConfig() {
 beforeEach(async () => {
   savedHome = process.env['OPENALICE_HOME']
   savedBackend = process.env['OPENALICE_SEALING_BACKEND']
+  savedGlobal = process.env['OPENALICE_GLOBAL_DIR']
   home = await mkdtemp(join(tmpdir(), 'oa-config-merge-'))
+  // The global provider-key store is sealed with this test's machine key.
+  // Keeping the suite-wide global dir would leave a file sealed by a deleted
+  // key from the previous test, which the strict write path correctly refuses.
+  process.env['OPENALICE_GLOBAL_DIR'] = join(home, 'global')
 })
 
 afterEach(async () => {
@@ -29,6 +35,8 @@ afterEach(async () => {
   else process.env['OPENALICE_HOME'] = savedHome
   if (savedBackend === undefined) delete process.env['OPENALICE_SEALING_BACKEND']
   else process.env['OPENALICE_SEALING_BACKEND'] = savedBackend
+  if (savedGlobal === undefined) delete process.env['OPENALICE_GLOBAL_DIR']
+  else process.env['OPENALICE_GLOBAL_DIR'] = savedGlobal
   vi.resetModules()
   await rm(home, { recursive: true, force: true })
 })

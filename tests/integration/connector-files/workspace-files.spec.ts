@@ -67,3 +67,24 @@ for (const socket of [false, true]) it(`posts Session controls over ${socket ? '
     await rm(root, { recursive: true, force: true })
   }
 })
+
+it('attaches the local bearer token and rejects an off-host route', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'connector-auth-wire-'))
+  let authorization: string | undefined
+  const server = createServer((req, res) => {
+    authorization = req.headers.authorization
+    res.writeHead(200, { 'content-type': 'application/json' })
+    res.end('{}')
+  })
+  try {
+    await listen(server, '')
+    vi.stubEnv('OPENALICE_MCP_PORT', String((server.address() as { port: number }).port))
+    vi.stubEnv('OPENALICE_LOCAL_TOKEN', `oa1_${'A'.repeat(43)}`)
+    await fetchAliceJson('/cli/health')
+    expect(authorization).toBe(`Bearer oa1_${'A'.repeat(43)}`)
+    await expect(fetchAliceJson('//attacker.example/cli/health')).rejects.toThrow(/local \/cli/)
+  } finally {
+    await new Promise<void>(resolve => server.close(() => resolve()))
+    await rm(root, { recursive: true, force: true })
+  }
+})

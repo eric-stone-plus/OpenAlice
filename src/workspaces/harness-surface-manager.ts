@@ -4,7 +4,7 @@ import { randomBytes } from 'node:crypto'
 
 import { terminateProcessTree } from '@traderalice/guardian-runtime'
 
-import { buildHarnessEnv, sandboxHarnessCommand } from './harness-sandbox.js'
+import { buildHarnessEnv, parseSandboxMode, sandboxHarnessCommand } from './harness-sandbox.js'
 import { buildSpawnEnv } from './spawn-env.js'
 import { resolveLaunchCommand } from './win-command.js'
 import { userDataHome } from '../core/paths.js'
@@ -190,7 +190,7 @@ export class HarnessSurfaceManager {
         args,
         cwd: workspace.dir,
         home: env['HOME'],
-        dataHome: process.env['OPENALICE_HOME'] ?? userDataHome,
+        dataHome: process.env['OPENALICE_HOME']?.trim() || userDataHome,
         env,
         controlEnv: process.env,
       })
@@ -209,7 +209,7 @@ export class HarnessSurfaceManager {
       capability,
       mode: sandboxed.mode,
     })
-    if (sandboxed.mode === 'none') {
+    if (sandboxed.mode === 'none' && parseSandboxMode(process.env['OPENALICE_HARNESS_SANDBOX']) !== 'off') {
       launcherLogger.warn('harness_surface.sandbox_unavailable', {
         workspaceId,
         capability,

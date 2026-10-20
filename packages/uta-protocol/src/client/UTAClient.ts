@@ -48,6 +48,40 @@ export class UTAHttpError extends Error {
   }
 }
 
+/** Strict loopback check for a URL hostname.
+ *
+ *  WHATWG `URL` normalizes legacy IPv4 forms (`127.1` -> `127.0.0.1`), so a
+ *  literal dotted quad is enough. Never use a prefix match here:
+ *  `127.evil.com` and `127.0.0.1.attacker.tld` are hostnames, not loopback. */
+export function isLoopbackHost(hostname: string): boolean {
+  const host = hostname.toLowerCase()
+  if (
+    host === 'localhost'
+    || host === '[::1]'
+    || host === '[::ffff:127.0.0.1]'
+    || host === '[::ffff:7f00:1]'
+  ) return true
+  const match = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host)
+  if (!match) return false
+  const [a, b, c, d] = match.slice(1).map(Number) as [number, number, number, number]
+  return a === 127 && b <= 255 && c <= 255 && d <= 255
+}
+
+/** Refuse to attach the local bearer token to a non-loopback base URL.
+ *  Callers that build their own fetch (the BFF proxy, broker-pack probe) use
+ *  this too, so the SDK is not the only guard. */
+export function assertLoopbackForLocalToken(baseUrl: string): void {
+  let hostname: string
+  try {
+    hostname = new URL(baseUrl).hostname
+  } catch {
+    throw new Error('UTA base URL is not a valid URL')
+  }
+  if (!isLoopbackHost(hostname)) {
+    throw new Error('refusing to send the local bearer token to a non-loopback UTA URL')
+  }
+}
+
 export function createUTAClient(options: UTAClientOptions): UTAClient {
   const baseUrl = options.baseUrl.replace(/\/$/, '')
   const fetchImpl = options.fetch ?? globalThis.fetch
@@ -64,6 +98,10 @@ export function createUTAClient(options: UTAClientOptions): UTAClient {
   }
 
   async function request<T>(method: string, path: string, opts: RequestOpts = {}): Promise<T> {
+    // Validate at request time, not construction time: lite mode still builds
+    // a client, and a stale non-loopback URL must not abort startup before the
+    // first request. No request is sent with the token when this throws.
+    if (options.token) assertLoopbackForLocalToken(baseUrl)
     const url = buildUrl(path, opts.params)
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), timeoutMs)

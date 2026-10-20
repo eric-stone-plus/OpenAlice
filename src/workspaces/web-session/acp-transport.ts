@@ -54,6 +54,10 @@ export class AcpTransport implements WebSessionTransport {
   private sessionId: string | null
   private pendingUserText: string | null = null
   private turnActive = false
+  private turnGeneration = 0
+  private pinRestoreRunning: Promise<void> | null = null
+  private pinRestorePending = false
+  private readonly advertisedPinOptions = new Set<PinKind>()
 
   constructor(private readonly ctx: WebTransportContext) {
     this.sessionId = ctx.input.nativeSessionId ?? null
@@ -115,7 +119,25 @@ export class AcpTransport implements WebSessionTransport {
     if (!text) throw new Error('prompt cannot be empty')
     if (!this.sessionId) throw new Error('ACP session is not established')
     if (this.turnActive) throw new Error(`${this.ctx.input.agent} is still working on the previous prompt`)
+    // Claim the turn before the first await: a second prompt can arrive while
+    // the pin restore is in flight and must not pass the same check.
     this.turnActive = true
+    const turnGeneration = ++this.turnGeneration
+    // The app-owned model/effort/mode invariant must hold before every turn,
+    // not only after session/new or a configure() call. A runtime-initiated
+    // drift that could not be restored fails the prompt instead of running.
+    try {
+      await this.ensureConfigPin()
+    } catch (error) {
+      this.turnActive = false
+      throw error
+    }
+    // A notification-triggered restore or dispose can land while the pin check
+    // awaits the runtime. Do not send a prompt into a cancelled/closed turn.
+    if (!this.turnActive || this.ctx.channel.closed || !this.sessionId) {
+      this.turnActive = false
+      throw new Error('the ACP turn was cancelled before the prompt was sent')
+    }
     this.ctx.state.error = null
     this.builder.user(text)
     this.ctx.state.setPhase('working')
@@ -124,8 +146,8 @@ export class AcpTransport implements WebSessionTransport {
       prompt: [{ type: 'text', text }],
     }, null)
     void turn.then(
-      (result) => this.finishTurn(isJsonObject(result) ? stringOrNull(result['stopReason']) : null, null),
-      (error: Error) => this.finishTurn(null, error),
+      (result) => this.finishTurn(isJsonObject(result) ? stringOrNull(result['stopReason']) : null, null, turnGeneration),
+      (error: Error) => this.finishTurn(null, error, turnGeneration),
     )
   }
 
@@ -164,17 +186,43 @@ export class AcpTransport implements WebSessionTransport {
     if (!request.options.some((option) => option.id === optionId)) {
       throw new Error(`option ${optionId} is not offered by request ${requestId}`)
     }
+    // Resolve the user's answer first: a runtime that is blocked on this
+    // permission must not also wait for a config round-trip. The pin is
+    // re-asserted immediately afterwards; failure aborts the turn.
+    if (this.permissions.get(requestId) !== pending) return
     this.permissions.delete(requestId)
     this.ctx.state.removeRequest(requestId)
     pending.resolve({ outcome: { outcome: 'selected', optionId } })
+    // Capture the turn before the pin round-trip: the runtime is already
+    // unblocked and may finish the turn while the restore is in flight.
+    const generation = this.turnGeneration
+    try {
+      await this.ensureConfigPin()
+    } catch (error) {
+      const message = `could not restore the pinned ${this.ctx.input.agent} config: ${error instanceof Error ? error.message : String(error)}`
+      this.ctx.logger.warn(message)
+      if (this.turnActive && generation === this.turnGeneration && !this.ctx.channel.closed) {
+        void this.abort().catch(() => undefined)
+        this.finishTurn(null, new Error(message), generation)
+        this.ctx.state.fail(message)
+      }
+      throw error
+    }
   }
 
   dispose(): void {
+    // Invalidate any in-flight prompt settlement before disposing.
+    this.turnGeneration += 1
+    this.turnActive = false
     this.cancelPermissions()
     this.peer.dispose(new Error('ACP session stopped'))
   }
 
-  private finishTurn(stopReason: string | null, error: Error | null): void {
+  private finishTurn(stopReason: string | null, error: Error | null, generation = this.turnGeneration): void {
+    // A cancelled prompt can settle after the turn was already finalized and
+    // a new prompt started. Ignore that stale settlement.
+    if (generation !== this.turnGeneration) return
+    this.turnGeneration += 1
     this.turnActive = false
     this.cancelPermissions()
     this.flushUser()
@@ -231,17 +279,107 @@ export class AcpTransport implements WebSessionTransport {
       }
       case 'config_option_update':
         this.applyConfigOptions(update)
+        this.schedulePinRestore()
         break
+      case 'current_mode_update': {
+        // A runtime-initiated mode switch must not silently drift the
+        // app-owned pin. Update the projected option, then re-apply.
+        const currentModeId = stringOrNull(update['currentModeId'])
+        const mode = this.findPinnedOption('mode')
+        if (currentModeId && mode) {
+          this.ctx.state.setConfigOptions(this.ctx.state.configOptions.map((option) =>
+            option.id === mode.id ? { ...option, currentValue: currentModeId } : option))
+        }
+        this.schedulePinRestore()
+        break
+      }
       default:
-        // plan, available_commands_update, current_mode_update
+        // plan, available_commands_update
         break
+    }
+  }
+
+  private schedulePinRestore(): void {
+    const generation = this.turnGeneration
+    void this.restoreConfigPin().catch((error: unknown) => {
+      const message = `could not restore the pinned ${this.ctx.input.agent} config: ${error instanceof Error ? error.message : String(error)}`
+      this.ctx.logger.warn(message)
+      // A mid-turn drift must not keep executing tools under the wrong
+      // model/effort/mode for the rest of the turn. Ignore a restore that
+      // outlived the turn it was scheduled for.
+      if (this.turnActive && generation === this.turnGeneration && !this.ctx.channel.closed) {
+        // Stop the runtime too: finishTurn only clears local state, so the
+        // agent would otherwise keep executing tools under the drifted config.
+        void this.abort().catch((abortError: unknown) => {
+          this.ctx.logger.warn(`could not cancel the drifted ${this.ctx.input.agent} turn: ${abortError instanceof Error ? abortError.message : String(abortError)}`)
+        })
+        this.finishTurn(null, new Error(message), generation)
+        this.ctx.state.fail(message)
+      }
+    })
+  }
+
+  /** Re-assert the app-owned pin after a runtime-initiated config or mode
+   *  notification. A notification that lands during an in-flight restore sets
+   *  a dirty flag; the running pass repeats (bounded) instead of dropping it.
+   *  Errors are logged here; prompt()/respond() call ensureConfigPin() and
+   *  fail closed instead of running with a drifted model/effort/mode. */
+  private async restoreConfigPin(depth = 0): Promise<void> {
+    if (!this.ctx.input.configPin) return
+    if (this.pinRestoreRunning) {
+      this.pinRestorePending = true
+      await this.pinRestoreRunning
+      if (this.pinRestorePending && depth < 2) {
+        this.pinRestorePending = false
+        await this.restoreConfigPin(depth + 1)
+      }
+      return
+    }
+    this.pinRestoreRunning = this.runPinRestore()
+    try {
+      await this.pinRestoreRunning
+    } finally {
+      this.pinRestoreRunning = null
+    }
+  }
+
+  private async runPinRestore(): Promise<void> {
+    for (let pass = 0; pass < 3; pass += 1) {
+      this.pinRestorePending = false
+      await this.applyConfigPin()
+      if (!this.pinRestorePending) return
+    }
+    throw new Error(`could not stabilize the pinned ${this.ctx.input.agent} config after 3 attempts`)
+  }
+
+  /** Fail closed at the next app action if the pin cannot be restored. */
+  private async ensureConfigPin(): Promise<void> {
+    if (!this.ctx.input.configPin) return
+    try {
+      await this.restoreConfigPin()
+    } catch (error: unknown) {
+      const normalized = error instanceof Error ? error : new Error(String(error))
+      if (!this.ctx.channel.closed) this.ctx.state.fail(normalized.message)
+      throw normalized
     }
   }
 
   /** Store runtime-advertised config selects (model/effort/mode). */
   private applyConfigOptions(value: unknown): void {
     const options = configOptionsFrom(value)
-    if (options.length > 0) this.ctx.state.setConfigOptions(options)
+    if (options.length > 0) {
+      this.ctx.state.setConfigOptions(options)
+      for (const kind of ['mode', 'model', 'effort'] as const) {
+        if (this.findPinnedOption(kind)) this.advertisedPinOptions.add(kind)
+      }
+    } else if (isJsonObject(value) && Array.isArray(value['configOptions'])) {
+      // Any payload carrying the option set replaces it, even when every entry
+      // was filtered out. Leaving stale selects would make the pin check pass
+      // against an option the runtime no longer advertises.
+      // Keep advertisedPinOptions: a pinned kind that was offered and then
+      // disappeared is drift, not a runtime that never supported it.
+      this.ctx.state.setConfigOptions([])
+    }
   }
 
   /** Apply the adapter-owned invariant after session/new or session/load.
@@ -262,18 +400,34 @@ export class AcpTransport implements WebSessionTransport {
       if (mode.currentValue !== pin.mode) await this.configure(mode.id, pin.mode)
     }
     const model = this.findPinnedOption('model')
-    if (pin.model && model) {
-      if (!model.options.some((entry) => entry.value === pin.model)) {
-        throw new Error(`${this.ctx.input.agent} does not offer the pinned model ${pin.model}`)
+    if (pin.model) {
+      if (!model) {
+        // An option that was advertised and then disappeared is runtime drift,
+        // not a runtime that never supported model selection. Fail closed.
+        if (this.advertisedPinOptions.has('model')) {
+          throw new Error(`${this.ctx.input.agent} removed the pinned model option ${pin.model}`)
+        }
+        this.ctx.logger.warn(`${this.ctx.input.agent} did not advertise a model option; the pinned model may not be applied`)
+      } else {
+        if (!model.options.some((entry) => entry.value === pin.model)) {
+          throw new Error(`${this.ctx.input.agent} does not offer the pinned model ${pin.model}`)
+        }
+        if (model.currentValue !== pin.model) await this.configure(model.id, pin.model)
       }
-      if (model.currentValue !== pin.model) await this.configure(model.id, pin.model)
     }
     const effort = this.findPinnedOption('effort')
-    if (pin.reasoningEffort && effort) {
-      if (!effort.options.some((entry) => entry.value === pin.reasoningEffort)) {
-        throw new Error(`${this.ctx.input.agent} does not offer the pinned effort ${pin.reasoningEffort}`)
+    if (pin.reasoningEffort) {
+      if (!effort) {
+        if (this.advertisedPinOptions.has('effort')) {
+          throw new Error(`${this.ctx.input.agent} removed the pinned effort option ${pin.reasoningEffort}`)
+        }
+        this.ctx.logger.warn(`${this.ctx.input.agent} did not advertise an effort option; the pinned effort may not be applied`)
+      } else {
+        if (!effort.options.some((entry) => entry.value === pin.reasoningEffort)) {
+          throw new Error(`${this.ctx.input.agent} does not offer the pinned effort ${pin.reasoningEffort}`)
+        }
+        if (effort.currentValue !== pin.reasoningEffort) await this.configure(effort.id, pin.reasoningEffort)
       }
-      if (effort.currentValue !== pin.reasoningEffort) await this.configure(effort.id, pin.reasoningEffort)
     }
   }
 
@@ -347,12 +501,16 @@ export class AcpTransport implements WebSessionTransport {
     })
   }
 
+  private cancelPermission(requestId: string): void {
+    const pending = this.permissions.get(requestId)
+    if (!pending) return
+    this.permissions.delete(requestId)
+    this.ctx.state.removeRequest(requestId)
+    pending.resolve({ outcome: { outcome: 'cancelled' } })
+  }
+
   private cancelPermissions(): void {
-    for (const [requestId, pending] of this.permissions) {
-      this.permissions.delete(requestId)
-      this.ctx.state.removeRequest(requestId)
-      pending.resolve({ outcome: { outcome: 'cancelled' } })
-    }
+    for (const requestId of [...this.permissions.keys()]) this.cancelPermission(requestId)
   }
 
   private flushUser(): void {

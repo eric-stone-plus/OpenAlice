@@ -77,4 +77,32 @@ describe('global provider keys', () => {
     expect(cfg.providerKeys.fmp).toBe('local-fmp')
     expect(cfg.providers.equity).toBeTruthy()
   })
+
+  it('refuses to overwrite a corrupt global file on save', async () => {
+    const corrupt = 'not json{{{'
+    await writeFile(join(globalDir, 'provider-keys.json'), corrupt)
+    await seedLocal({ fmp: 'keep-me' })
+    const localPath = join(dataHome, 'data', 'config', 'market-data.json')
+    const localBefore = await readFile(localPath, 'utf8')
+    await expect(config.writeConfigSection('marketData', {
+      providerKeys: { fmp: 'new-fmp' },
+    })).rejects.toThrow()
+    expect(await readFile(join(globalDir, 'provider-keys.json'), 'utf8')).toBe(corrupt)
+    // The strict global read must abort before the local store is touched.
+    expect(await readFile(localPath, 'utf8')).toBe(localBefore)
+  })
+
+  it('refuses to overwrite a sealed global file it cannot unseal', async () => {
+    await seedLocal({})
+    const envelope = await sealing.seal({ fred: 'old-fred' })
+    // Corrupt the authenticated ciphertext; the write path must not quarantine
+    // it and silently replace the original path with a fresh store.
+    envelope.data = `${envelope.data.startsWith('A') ? 'B' : 'A'}${envelope.data.slice(1)}`
+    const bytes = JSON.stringify(envelope)
+    await writeFile(join(globalDir, 'provider-keys.json'), bytes)
+    await expect(config.writeConfigSection('marketData', {
+      providerKeys: { fmp: 'new-fmp' },
+    })).rejects.toThrow(/refusing to overwrite/)
+    expect(await readFile(join(globalDir, 'provider-keys.json'), 'utf8')).toBe(bytes)
+  })
 })

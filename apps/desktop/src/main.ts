@@ -907,12 +907,20 @@ app.whenReady().then(async () => {
   // fork their trading history.
   if (app.isPackaged && ((!explicitUserDataHome && selectedDefaultHome) || localStartupProject === 'default' && userDataHome === defaultUserDataHome)) {
     try {
-      await relocateLegacyData(app.getPath('userData'), userDataHome)
+      await relocateLegacyData(app.getPath('userData'), userDataHome, (message) => {
+        void dialog.showMessageBox({
+          type: 'warning',
+          title: 'OpenAlice — data relocation incomplete',
+          message,
+        }).catch((error: unknown) => {
+          console.warn(`could not show the relocation warning: ${error instanceof Error ? error.message : String(error)}`)
+        })
+      })
     } catch (err) {
       dialog.showErrorBox(
         'OpenAlice — data relocation failed',
         `Could not move the user data store from\n${app.getPath('userData')}\nto\n${userDataHome}\n\n` +
-          `This includes data/ and the sealing key files beside it.\n\n` +
+          `This includes data/, the sealing key and fingerprint files, and the sealed provider-key store.\n\n` +
           `${err instanceof Error ? err.message : String(err)}\n\nOpenAlice stopped before completing the move. Review the legacy and new data directories before relaunching; some items may already have moved.`,
       )
       app.quit()

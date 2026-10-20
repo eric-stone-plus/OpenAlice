@@ -11,8 +11,20 @@ export {
   type SealedEnvelope,
 } from './envelope.js'
 export {
+  LOCAL_TOKEN_BYTES,
+  LOCAL_TOKEN_PATTERN,
+  LOCAL_TOKEN_PREFIX,
+  LOCAL_TOKEN_RELATIVE_PATH,
+  localTokenPath,
+  localTokenTempName,
+  localTokenTempPid,
+} from './local-auth-path.js'
+export {
   clearSealingKeyCache,
   deleteKey,
+  CREDENTIAL_CLAIM_RECOVERY_MS,
+  isSealingStoreError,
+  recoverSealingClaimFile,
   keyStatus,
   loadOrCreateKey,
   readKey,

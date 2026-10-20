@@ -1,6 +1,10 @@
 import { describe, expect, it, vi, afterEach } from 'vitest'
 import { createTradingProxyRoutes } from './trading-proxy.js'
 
+vi.mock('../../server/local-auth.js', () => ({
+  resolveLocalToken: vi.fn(async () => 'oa1_test'),
+}))
+
 afterEach(() => {
   vi.unstubAllGlobals()
 })
@@ -62,6 +66,36 @@ describe('createTradingProxyRoutes — UTA optional carrier', () => {
     })
     const res = await app.request('/api/trading/uta/alpaca/wallet/stage-place-order', { method: 'POST', body: '{}' })
     expect(res.status).toBe(200)
+  })
+
+  it('refuses to forward the local token to a non-loopback UTA URL', async () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    const app = createTradingProxyRoutes({
+      utaBaseUrl: 'http://evil.example:47333',
+      getPolicy: () => ({ mode: 'pro', source: 'config', envLocked: false, hasUTAConfig: true }),
+    })
+    const res = await app.request('/api/trading/uta/__uta/health')
+    expect(res.status).toBe(502)
+    await expect(res.json()).resolves.toMatchObject({ error: 'UTA URL is not loopback' })
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('reports unavailable status for a non-loopback UTA URL without probing it', async () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    const app = createTradingProxyRoutes({
+      utaBaseUrl: 'http://evil.example:47333',
+      getPolicy: () => ({ mode: 'pro', source: 'config', envLocked: false, hasUTAConfig: true }),
+    })
+    const res = await app.request('/status')
+    expect(res.status).toBe(200)
+    await expect(res.json()).resolves.toMatchObject({
+      available: false,
+      state: 'unavailable',
+      reason: 'not_loopback',
+    })
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 
   it('reports unavailable status when no carrier URL is configured', async () => {

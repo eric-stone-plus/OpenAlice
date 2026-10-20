@@ -1,5 +1,5 @@
 import { Hono } from 'hono'
-import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -59,6 +59,33 @@ describe('local auth token', () => {
     await writeFile(localTokenPath(home), `${token}\n`, { mode: 0o644 })
     expect(await ensureLocalToken(home)).toBe(token)
     expect((await stat(localTokenPath(home))).mode & 0o777).toBe(0o600)
+  })
+
+  it('accepts a restored 0755 auth directory and tightens it', async () => {
+    const { mkdir, chmod } = await import('node:fs/promises')
+    const authDir = join(home, 'auth')
+    await mkdir(authDir, { recursive: true })
+    await chmod(authDir, 0o755)
+    const token = `oa1_${'b'.repeat(43)}`
+    await writeFile(localTokenPath(home), `${token}\n`, { mode: 0o600 })
+    expect(await ensureLocalToken(home)).toBe(token)
+    expect((await stat(authDir)).mode & 0o777).toBe(0o700)
+  })
+
+  it('rejects a symlinked token path', async () => {
+    await mkdir(join(home, 'auth'), { recursive: true })
+    const target = join(home, 'outside-token')
+    await writeFile(target, `oa1_${'a'.repeat(43)}\n`, { mode: 0o600 })
+    await symlink(target, localTokenPath(home))
+    await expect(ensureLocalToken(home)).rejects.toThrow(/symlink/)
+  })
+
+  it('rejects a symlinked auth directory', async () => {
+    const real = join(home, 'real-auth')
+    await mkdir(real, { recursive: true })
+    await writeFile(join(real, 'local.token'), `oa1_${'a'.repeat(43)}\n`, { mode: 0o600 })
+    await symlink(real, join(home, 'auth'))
+    await expect(ensureLocalToken(home)).rejects.toThrow(/symlink/)
   })
 
   it('compares without throwing on length mismatch', async () => {

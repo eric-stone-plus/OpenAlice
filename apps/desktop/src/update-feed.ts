@@ -62,7 +62,10 @@ async function fetchBytes(url: URL, fetchImpl: typeof fetch): Promise<Buffer> {
     signal: AbortSignal.timeout(FEED_TIMEOUT_MS),
     headers: { accept: 'application/json' },
   })
-  if (!response.ok) throw new Error(`Update manifest request failed: HTTP ${response.status}`)
+  if (!response.ok) {
+    await response.body?.cancel().catch(() => undefined)
+    throw new Error(`Update manifest request failed: HTTP ${response.status}`)
+  }
   const length = Number(response.headers.get('content-length') ?? '0')
   if (Number.isFinite(length) && length > MAX_MANIFEST_BYTES) {
     await response.body?.cancel().catch(() => undefined)

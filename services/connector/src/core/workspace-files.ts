@@ -1,8 +1,8 @@
 import { request } from 'node:http'
 import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
-import { join } from 'node:path'
 import { connectorAttachmentSchema, type ConnectorAttachment } from '@traderalice/connector-protocol'
+import { LOCAL_TOKEN_PATTERN, localTokenPath } from '@traderalice/sealing-key'
 import { userDataHome } from '@/core/paths.js'
 
 /** Calls Alice's generic file API. Neither paths nor URLs come from model-selected hosts. */
@@ -13,8 +13,6 @@ export async function fetchWorkspaceAttachment(workspaceId: string, path: string
   return connectorAttachmentSchema.parse({ filename: file.filename, contentBase64: file.contentBase64, sizeBytes: bytes.length,
     mediaType: mediaType(file.filename), contentSha256: createHash('sha256').update(bytes).digest('hex') })
 }
-
-const LOCAL_TOKEN_PATTERN = /^oa1_[A-Za-z0-9_-]{43}$/
 
 function authHeader(token: string): Record<string, string> {
   const trimmed = token.trim()
@@ -34,7 +32,7 @@ async function localAuthHeader(): Promise<Record<string, string>> {
   // same default root the server uses instead of silently sending no token.
   const home = process.env['OPENALICE_HOME']?.trim() || userDataHome
   const tokenPath = process.env['OPENALICE_LOCAL_TOKEN_FILE']?.trim()
-    || join(home, 'auth', 'local.token')
+    || localTokenPath(home)
   try {
     return authHeader(await readFile(tokenPath, 'utf8'))
   } catch (error: unknown) {
@@ -54,8 +52,20 @@ function mediaType(filename: string): string {
 
 /** Fixed local gateway; model input cannot choose a host or socket. */
 export async function fetchAliceJson(route: string, body?: unknown): Promise<string> {
-  const port = Number(process.env['OPENALICE_MCP_PORT'] ?? 47332)
-  const url = new URL(route, `http://127.0.0.1:${port}`)
+  const rawPort = process.env['OPENALICE_MCP_PORT']?.trim()
+  const port = Number(rawPort || 47332)
+  if (!Number.isInteger(port) || port < 1 || port > 65_535) {
+    throw new Error('OPENALICE_MCP_PORT must be a TCP port between 1 and 65535')
+  }
+  // Normalize both sides through the URL parser: a raw template string would
+  // reject valid non-canonical port spellings (leading zeros, whitespace).
+  const base = new URL(`http://127.0.0.1:${port}`)
+  const url = new URL(route, base)
+  // The request carries the local bearer token; never let a caller-supplied
+  // route turn it into an off-host request.
+  if (url.origin !== base.origin || !url.pathname.startsWith('/cli/')) {
+    throw new Error('Alice gateway route must stay on the local /cli endpoint')
+  }
   const socketPath = process.env['OPENALICE_TOOL_SOCKET']
   const headers = { 'Content-Type': 'application/json', ...await localAuthHeader() }
   const raw = await new Promise<string>((resolve, reject) => {

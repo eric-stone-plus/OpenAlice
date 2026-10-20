@@ -1,10 +1,10 @@
 import { createHash, createPublicKey, verify } from 'node:crypto'
+import { constants, statSync, type Stats } from 'node:fs'
 import { open, realpath, stat } from 'node:fs/promises'
 import { resolve, sep } from 'node:path'
 
 export const MAX_MANIFEST_BYTES = 64 * 1024
-const SHA512_BASE64 = /^[A-Za-z0-9+/]{86}==$/
-const SIGNATURE_BASE64 = /^[A-Za-z0-9+/]{86}==$/
+const BASE64_64 = /^[A-Za-z0-9+/]{86}==$/
 const MAX_PACKAGE_BYTES = 2 * 1024 * 1024 * 1024
 
 export interface LinuxUpdateManifest {
@@ -36,9 +36,11 @@ export type UpdateVerificationFailure =
   | 'untrusted-key'
   | 'metadata-mismatch'
   | 'package-missing'
+  | 'package-unreadable'
   | 'package-size-mismatch'
   | 'package-hash-mismatch'
   | 'package-outside-cache'
+  | 'package-changed'
 
 export class UpdateVerificationError extends Error {
   constructor(readonly code: UpdateVerificationFailure, message: string) {
@@ -69,7 +71,7 @@ export function verifyUpdateManifest(input: {
     const shown = envelope.keyId.slice(0, 64).replace(/[^A-Za-z0-9._-]/g, '?')
     throw new UpdateVerificationError('untrusted-key', `Update manifest was signed by untrusted key ${shown}`)
   }
-  if (!SIGNATURE_BASE64.test(envelope.value)) {
+  if (!BASE64_64.test(envelope.value)) {
     throw new UpdateVerificationError('signature-invalid', 'Update signature is not valid Ed25519 base64')
   }
   const signature = Buffer.from(envelope.value, 'base64')
@@ -95,19 +97,26 @@ export function verifyUpdateManifest(input: {
     || manifest.channel !== input.expected.channel) {
     throw new UpdateVerificationError('metadata-mismatch', 'Update manifest identity does not match this build')
   }
-  const now = (input.now ?? new Date()).getTime()
+  assertManifestCurrent(manifest, input.now ?? new Date())
+  return manifest
+}
+
+/** Re-check a signed manifest's validity window. The window is enforced when
+ *  the manifest is fetched, but an install can happen much later; re-check it
+ *  at the handoff as well. */
+export function assertManifestCurrent(manifest: LinuxUpdateManifest, now = new Date()): void {
+  const time = now.getTime()
   const published = Date.parse(manifest.publishedAt)
   const expires = Date.parse(manifest.expiresAt)
-  if (!Number.isFinite(now)) {
+  if (!Number.isFinite(time)) {
     throw new UpdateVerificationError('manifest-invalid', 'Update verification time is invalid')
   }
   if (!Number.isFinite(published) || !Number.isFinite(expires) || expires <= published) {
     throw new UpdateVerificationError('manifest-invalid', 'Update manifest validity window is invalid')
   }
-  if (now < published || now > expires) {
+  if (time < published || time > expires) {
     throw new UpdateVerificationError('manifest-invalid', 'Update manifest is outside its validity window')
   }
-  return manifest
 }
 
 /** Bind a verified manifest to the untrusted `UpdateInfo` electron-updater
@@ -127,7 +136,7 @@ export function bindVerifiedRelease(
   if (!Array.isArray(info.files)) {
     throw new UpdateVerificationError('metadata-mismatch', 'Feed release has no file list')
   }
-  const file = info.files.find((entry) => entry.url === manifest.fileName)
+  const file = info.files.find((entry) => entry?.url === manifest.fileName)
   if (!file) {
     throw new UpdateVerificationError('metadata-mismatch', 'Signed package is not present in the feed release')
   }
@@ -136,18 +145,70 @@ export function bindVerifiedRelease(
   }
 }
 
+/** Identity of the package inode that was hashed, used to detect a swap
+ *  between the final verification and the updater handoff. */
+export interface VerifiedPackageIdentity {
+  dev: number
+  ino: number
+  size: number
+  mtimeMs: number
+  ctimeMs: number
+}
+
+/** Map a `Stats` record to the inode identity used by the handoff guard. */
+export function packageIdentityFromStats(info: Stats): VerifiedPackageIdentity {
+  return {
+    dev: info.dev,
+    ino: info.ino,
+    size: info.size,
+    mtimeMs: info.mtimeMs,
+    ctimeMs: info.ctimeMs,
+  }
+}
+
+/** Compare two inode identities. */
+export function samePackageIdentity(a: VerifiedPackageIdentity, b: VerifiedPackageIdentity): boolean {
+  return a.dev === b.dev && a.ino === b.ino && a.size === b.size
+    && a.mtimeMs === b.mtimeMs && a.ctimeMs === b.ctimeMs
+}
+
+/** Re-stat the path synchronously immediately before the updater handoff and
+ *  prove it still names the inode whose bytes were hashed. */
+export function assertPackageIdentity(identity: VerifiedPackageIdentity, file: string): void {
+  let current: Stats
+  try {
+    current = statSync(file)
+  } catch (error: unknown) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      throw new UpdateVerificationError('package-missing', 'Downloaded package disappeared before handoff')
+    }
+    throw new UpdateVerificationError(
+      'package-unreadable',
+      `Downloaded package could not be inspected before handoff: ${error instanceof Error ? error.message : String(error)}`,
+    )
+  }
+  if (!samePackageIdentity(identity, packageIdentityFromStats(current))) {
+    throw new UpdateVerificationError('package-changed', 'Downloaded package changed after verification')
+  }
+}
+
 /** Re-hash the downloaded package and prove it is the exact signed file.
  *  Call immediately before `quitAndInstall`, not only at download time.
+ *
+ *  Opens with `O_NOFOLLOW`, hashes through the open descriptor, and stats that
+ *  same descriptor before and after the read, so the bytes that were hashed
+ *  are the bytes the identity describes. The caller can then compare the
+ *  returned identity synchronously right before the handoff.
  *
  *  This narrows the window but does not close a same-UID race: the installer
  *  re-opens the path after this check. Closing that would require a privileged
  *  verifier or installing from an already-open descriptor; the current
  *  updater API does neither. */
-export async function verifyDownloadedPackage(
+export async function verifyDownloadedPackageWithIdentity(
   manifest: LinuxUpdateManifest,
   downloadedFile: string,
   cacheDir: string,
-): Promise<void> {
+): Promise<VerifiedPackageIdentity> {
   const cacheRoot = resolve(cacheDir)
   const lexical = resolve(downloadedFile)
   if (lexical !== cacheRoot && !lexical.startsWith(cacheRoot + sep)) {
@@ -164,33 +225,65 @@ export async function verifyDownloadedPackage(
   if (file !== cacheReal && !file.startsWith(cacheReal + sep)) {
     throw new UpdateVerificationError('package-outside-cache', 'Downloaded package is outside the updater cache')
   }
-  let info
-  try {
-    info = await stat(file)
-  } catch {
-    throw new UpdateVerificationError('package-missing', 'Downloaded package is missing')
-  }
-  if (!info.isFile() || info.size !== manifest.fileSize) {
-    throw new UpdateVerificationError('package-size-mismatch', 'Downloaded package size does not match the signed manifest')
-  }
-  const hash = createHash('sha512')
   let handle
   try {
-    handle = await open(file, 'r')
-  } catch {
-    throw new UpdateVerificationError('package-missing', 'Downloaded package could not be opened')
+    // Reject a FIFO/socket/device before opening: O_RDONLY on a FIFO blocks
+    // until a writer appears, which would hang install with installInProgress
+    // set forever. O_NONBLOCK makes a swap after this stat fail fast too;
+    // regular files ignore it.
+    const beforeOpen = await stat(file)
+    if (!beforeOpen.isFile()) {
+      throw new UpdateVerificationError('package-changed', 'Downloaded package is not a regular file')
+    }
+    // O_NOFOLLOW is a no-op where the constant is absent (Windows); the
+    // realpath containment check above still applies there.
+    handle = await open(file, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0))
+  } catch (error: unknown) {
+    if (error instanceof UpdateVerificationError) throw error
+    const code = (error as NodeJS.ErrnoException).code
+    if (code === 'ELOOP') {
+      throw new UpdateVerificationError('package-changed', 'Downloaded package path changed during verification')
+    }
+    if (code === 'ENOENT') {
+      throw new UpdateVerificationError('package-missing', 'Downloaded package is missing')
+    }
+    // EACCES/EMFILE/ENOTDIR are not evidence that the package vanished.
+    throw new UpdateVerificationError('package-unreadable', 'Downloaded package could not be opened')
   }
   try {
+    const before = await handle.stat()
+    if (!before.isFile()) {
+      throw new UpdateVerificationError('package-changed', 'Downloaded package is not a regular file')
+    }
+    if (before.size !== manifest.fileSize) {
+      throw new UpdateVerificationError('package-size-mismatch', 'Downloaded package size does not match the signed manifest')
+    }
+    const hash = createHash('sha512')
     for await (const chunk of handle.createReadStream({ autoClose: false })) {
       hash.update(chunk as Buffer)
     }
+    const after = await handle.stat()
+    if (!samePackageIdentity(before, after)) {
+      throw new UpdateVerificationError('package-changed', 'Downloaded package changed during verification')
+    }
+    const actual = hash.digest('base64')
+    if (actual !== manifest.fileSha512) {
+      throw new UpdateVerificationError('package-hash-mismatch', 'Downloaded package hash does not match the signed manifest')
+    }
+    return packageIdentityFromStats(after)
   } finally {
-    await handle.close()
+    // A close failure must not mask the verification error that triggered it.
+    await handle.close().catch(() => undefined)
   }
-  const actual = hash.digest('base64')
-  if (actual !== manifest.fileSha512) {
-    throw new UpdateVerificationError('package-hash-mismatch', 'Downloaded package hash does not match the signed manifest')
-  }
+}
+
+/** Backwards-compatible wrapper for callers that only need pass/fail. */
+export async function verifyDownloadedPackage(
+  manifest: LinuxUpdateManifest,
+  downloadedFile: string,
+  cacheDir: string,
+): Promise<void> {
+  await verifyDownloadedPackageWithIdentity(manifest, downloadedFile, cacheDir)
 }
 
 function parseSignature(value: unknown): UpdateManifestSignature {
@@ -227,7 +320,7 @@ function parseManifest(value: unknown): LinuxUpdateManifest {
     || !Number.isSafeInteger(sequence) || (sequence as number) < 1
     || typeof publishedAt !== 'string' || typeof expiresAt !== 'string'
     || typeof fileName !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._+-]*\.(?:rpm|deb|AppImage)$/.test(fileName) || fileName.includes('..')
-    || typeof fileSha512 !== 'string' || !SHA512_BASE64.test(fileSha512)
+    || typeof fileSha512 !== 'string' || !BASE64_64.test(fileSha512)
     || !Number.isSafeInteger(fileSize) || (fileSize as number) < 1 || (fileSize as number) > MAX_PACKAGE_BYTES
     || typeof releaseNotesUrl !== 'string' || !isSafeHttpsUrl(releaseNotesUrl)) {
     throw new UpdateVerificationError('manifest-invalid', 'Update manifest fields are invalid')

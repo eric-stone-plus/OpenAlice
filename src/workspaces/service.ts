@@ -303,8 +303,50 @@ function discloseEnvironmentValue(
 const LAUNCHER_OWNED_ADAPTER_ENV = new Set([
   'PATH',
   'HOME',
+  'USERPROFILE',
+  'HOMEDRIVE',
+  'HOMEPATH',
+  'APPDATA',
+  'LOCALAPPDATA',
+  'TEMP',
+  'TMP',
+  'COMSPEC',
+  'PATHEXT',
+  'SYSTEMROOT',
+  'SYSTEMDRIVE',
+  'WINDIR',
+  'PROGRAMFILES',
+  'PROGRAMFILES(X86)',
+  'PROGRAMW6432',
+  'COMMONPROGRAMFILES',
+  'COMMONPROGRAMFILES(X86)',
+  'COMMONPROGRAMW6432',
+  'PROGRAMDATA',
+  'ALLUSERSPROFILE',
+  'PUBLIC',
+  'PSMODULEPATH',
+  'NODE_PATH',
   'NODE_OPTIONS',
+  'NODE_TLS_REJECT_UNAUTHORIZED',
+  'NODE_EXTRA_CA_CERTS',
+  'NODE_USE_ENV_PROXY',
+  'SSL_CERT_FILE',
+  'SSL_CERT_DIR',
+  'SSLKEYLOGFILE',
+  'CURL_CA_BUNDLE',
+  'REQUESTS_CA_BUNDLE',
+  'GIT_SSL_CAINFO',
+  'OPENSSL_CONF',
+  'HTTP_PROXY',
+  'HTTPS_PROXY',
+  'ALL_PROXY',
+  'NO_PROXY',
+  'http_proxy',
+  'https_proxy',
+  'all_proxy',
+  'no_proxy',
   'LD_PRELOAD',
+  'LD_AUDIT',
   'LD_LIBRARY_PATH',
   'DYLD_INSERT_LIBRARIES',
   'DYLD_LIBRARY_PATH',
@@ -325,6 +367,9 @@ const LAUNCHER_OWNED_ADAPTER_ENV = new Set([
   'AQ_WS_ID',
   'AQ_RUN_ID',
   'AQ_SESSION_ID',
+  'AQ_LAUNCHER_REPO_ROOT',
+  'OPENALICE_RESUME_ID',
+  'OPENALICE_SIGNATURE',
 ])
 
 export function launchEnvironmentDisclosure(
@@ -1335,7 +1380,10 @@ export async function createWorkspaceService(opts: CreateWorkspaceServiceOptions
     // bearer token, tool endpoint, or the env vars that decide which binary
     // and config the child loads.
     for (const key of Object.keys(adapterEnv)) {
-      if (LAUNCHER_OWNED_ADAPTER_ENV.has(key)) delete adapterEnv[key];
+      // Windows environment names are case-insensitive; a workspace-authored
+      // `.codex/env.json` must not bypass the boundary with `Path`/`Home`.
+      const normalized = process.platform === 'win32' ? key.toUpperCase() : key;
+      if (LAUNCHER_OWNED_ADAPTER_ENV.has(normalized)) delete adapterEnv[key];
     }
     const env = { ...baseEnv, ...adapterEnv };
     const commandCtx = { ...baseCtx, env };
@@ -3204,6 +3252,11 @@ export async function createWorkspaceService(opts: CreateWorkspaceServiceOptions
     }, {
       start: async report => {
         let completed!: Promise<{ reason: string; failed?: boolean }>;
+        const webPin = sessionRuntimeProjection?.webConfigPin
+        // Shape-agnostic: a new WebConfigPin field must not silently drop the
+        // whole pin and fall back to the recorded binding.
+        const hasWebPin = webPin !== undefined
+          && Object.values(webPin).some((value) => value !== undefined)
         const snapshot = await web.start({
           onActivity: phase => { void report(phase).catch(() => launcherLogger.error('session_execution.activity_failed', { recordId: record.id })); },
           recordId: record.id,
@@ -3215,8 +3268,8 @@ export async function createWorkspaceService(opts: CreateWorkspaceServiceOptions
           cwd,
           env,
           ...(nativeSessionId ? { nativeSessionId } : {}),
-          ...(sessionRuntimeProjection?.webConfigPin
-            ? { configPin: sessionRuntimeProjection.webConfigPin }
+          ...(hasWebPin
+            ? { configPin: webPin }
             : {
                 ...(sessionRuntime.binding.model ? { model: sessionRuntime.binding.model } : {}),
                 ...(sessionRuntime.binding.reasoningEffort ? { reasoningEffort: sessionRuntime.binding.reasoningEffort } : {}),

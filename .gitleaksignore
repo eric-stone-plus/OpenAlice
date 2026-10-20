@@ -1,0 +1,4 @@
+# Exact historical findings only. A path or regex allowlist here would blind
+# the current file; these fingerprints name one commit, one file, one line.
+c409b3bac95187bab846732b52f43c68521fa867:src/core/scrub.spec.ts:private-key:25
+696a6ae0a8b33bbfbfba6e77e92db2a587f4e984:src/ai-providers/vercel-ai-sdk/vercel-provider.spec.ts:generic-api-key:61

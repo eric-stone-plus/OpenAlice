@@ -23,12 +23,12 @@ describe('scrubText', () => {
       'apiKey: "sk-live-abcdefghijklmnopqrstuvwxyz"',
       'password = super-secret-password-value',
       '-----BEGIN PRIVATE KEY-----',
-      'MIIEvQIBADANBgkqhkiG9w0BAQEFAASC',
+      'synthetic-private-key-material-not-a-secret',
       '-----END PRIVATE KEY-----',
     ].join('\n')
     const scrubbed = scrubText(text)
     expect(scrubbed).not.toContain('super-secret-password-value')
-    expect(scrubbed).not.toContain('MIIEvQIBADANBgkqhkiG9w0BAQEFAASC')
+    expect(scrubbed).not.toContain('synthetic-private-key-material-not-a-secret')
     expect(scrubbed).toContain('[redacted private key]')
   })
 
