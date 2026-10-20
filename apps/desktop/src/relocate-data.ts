@@ -249,13 +249,11 @@ async function copyRegularFile(source: string, destination: string): Promise<boo
     } catch (error: unknown) {
       const code = (error as NodeJS.ErrnoException).code
       if (code === 'EEXIST') return false
-      if (!['EPERM', 'EOPNOTSUPP', 'ENOTSUP', 'EXDEV', 'ENOSYS'].includes(code ?? '')) return false
+      if (!['EPERM', 'EOPNOTSUPP', 'ENOTSUP', 'EXDEV', 'ENOSYS'].includes(code ?? '')) throw error
       await copyFile(temporary, destination, constants.COPYFILE_EXCL)
       await ensurePrivateMode(destination)
       return true
     }
-  } catch {
-    return false
   } finally {
     await rm(temporary, { force: true }).catch(() => undefined)
   }
@@ -386,7 +384,10 @@ export async function relocateLegacyData(
           // removed the legacy copy. Copy it back without consuming the
           // destination's verifier.
           if (!existsSync(pair.to)) continue
-          if (!(await copyRegularFile(pair.to, pair.from))) continue
+          if (!(await copyRegularFile(pair.to, pair.from))) {
+            console.warn(`[relocate] could not restore ${pair.from}; ${pair.to} already exists or changed`)
+            continue
+          }
         } else if (await moveIfAbsent(pair.to, pair.from) !== 'moved') {
           continue
         }
