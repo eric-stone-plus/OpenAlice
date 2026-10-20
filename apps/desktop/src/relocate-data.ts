@@ -210,16 +210,54 @@ async function readRegularFile(path: string): Promise<Buffer | null> {
     if (!linkInfo || linkInfo.isSymbolicLink() || !linkInfo.isFile()) return null
   }
   const flags = constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0)
-  const handle = await open(path, flags).catch(() => null)
+  const handle = await open(path, flags).catch((error: unknown) => {
+    const code = (error as NodeJS.ErrnoException).code
+    if (code === 'ENOENT' || ['ELOOP', 'ENXIO', 'ENODEV', 'EMLINK'].includes(code ?? '')) return null
+    // Permissions, fd exhaustion, and I/O errors must reach the caller; treating
+    // them as "source vanished" can move data under the wrong key.
+    throw error
+  })
   if (!handle) return null
   try {
     const info = await handle.stat()
     if (!info.isFile()) return null
     return await handle.readFile()
-  } catch {
-    return null
+  } catch (error: unknown) {
+    const code = (error as NodeJS.ErrnoException).code
+    if (code === 'ENOENT' || ['ELOOP', 'ENXIO', 'ENODEV', 'EMLINK'].includes(code ?? '')) return null
+    throw error
   } finally {
     await handle.close().catch(() => undefined)
+  }
+}
+
+async function copyRegularFile(source: string, destination: string): Promise<boolean> {
+  const data = await readRegularFile(source)
+  if (!data) return false
+  const temporary = join(dirname(destination), `.relocate-${basename(destination)}.${process.pid}.${randomUUID()}.tmp`)
+  try {
+    const handle = await open(temporary, 'wx', 0o600)
+    try {
+      await handle.writeFile(data)
+    } finally {
+      await handle.close()
+    }
+    await ensurePrivateMode(temporary)
+    try {
+      await link(temporary, destination)
+      return true
+    } catch (error: unknown) {
+      const code = (error as NodeJS.ErrnoException).code
+      if (code === 'EEXIST') return false
+      if (!['EPERM', 'EOPNOTSUPP', 'ENOTSUP', 'EXDEV', 'ENOSYS'].includes(code ?? '')) return false
+      await copyFile(temporary, destination, constants.COPYFILE_EXCL)
+      await ensurePrivateMode(destination)
+      return true
+    }
+  } catch {
+    return false
+  } finally {
+    await rm(temporary, { force: true }).catch(() => undefined)
   }
 }
 
@@ -348,8 +386,7 @@ export async function relocateLegacyData(
           // removed the legacy copy. Copy it back without consuming the
           // destination's verifier.
           if (!existsSync(pair.to)) continue
-          await copyFile(pair.to, pair.from, constants.COPYFILE_EXCL)
-          await ensurePrivateMode(pair.from)
+          if (!(await copyRegularFile(pair.to, pair.from))) continue
         } else if (await moveIfAbsent(pair.to, pair.from) !== 'moved') {
           continue
         }
@@ -1047,14 +1084,8 @@ async function removeSource(from: string): Promise<void> {
 }
 
 async function sameContents(a: string, b: string): Promise<boolean> {
-  try {
-    const [left, right] = await Promise.all([readFile(a), readFile(b)])
-    return left.equals(right)
-  } catch (error: unknown) {
-    // A file that vanished during the comparison is a conflict; any other
-    // read failure (permissions, I/O) must be reported, not mislabeled as
-    // "different contents".
-    if (error instanceof Error && 'code' in error && (error as NodeJS.ErrnoException).code === 'ENOENT') return false
-    throw error
-  }
+  // Use the descriptor-bound reader so a FIFO or symlink swap cannot block or
+  // follow the comparison before moveIfAbsent re-checks the paths.
+  const [left, right] = await Promise.all([readRegularFile(a), readRegularFile(b)])
+  return left !== null && right !== null && left.equals(right)
 }

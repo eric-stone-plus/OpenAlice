@@ -1366,6 +1366,11 @@ export async function writeConfigSection(section: ConfigSection, data: unknown, 
     // local save into a 500 with memory and disk out of sync.
     try {
       await writeSecretFileAt(globalProviderKeysFile(), globalKeys)
+      // A local empty value is a tombstone: it suppresses a global key while
+      // the mirror may still have it. Do not delete it here with a second local
+      // write: that would persist a stale snapshot over a concurrent save.
+      // Safe removal needs a locked read-merge-write, which this path does not
+      // own; the tombstone is therefore intentionally sticky.
     } catch (error: unknown) {
       const message = `could not update the global provider-key mirror: ${error instanceof Error ? error.message : String(error)}`
       console.error(message)
