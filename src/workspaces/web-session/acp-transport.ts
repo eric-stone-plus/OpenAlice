@@ -41,6 +41,10 @@ const PINNED_OPTION_MATCHERS: Record<PinKind, {
   mode: { ids: MODE_OPTION_IDS, categories: ['mode'], value: pin => pin.mode },
 }
 const PIN_KINDS: readonly PinKind[] = ['model', 'effort', 'mode']
+/** A runtime that ignores session/cancel must not block every later prompt. */
+export const ACP_CANCEL_WATCHDOG_MS = 10_000
+/** A released turn that never settles must not leave the session fenced. */
+export const ACP_RELEASED_PROMPT_FENCE_MS = 30_000
 
 interface PendingPermission {
   readonly rpcId: string | number
@@ -55,7 +59,14 @@ export class AcpTransport implements WebSessionTransport {
   private pendingUserText: string | null = null
   private turnActive = false
   private cancelRequested = false
+  private cancelWatchdog: NodeJS.Timeout | null = null
   private turnGeneration = 0
+  /** A session/prompt request is outstanding (the watchdog only applies then). */
+  private promptOutstanding = false
+  /** Turns the watchdog released while their prompts are still outstanding.
+   *  Their content is fenced until each request settles or its deadline hits. */
+  private readonly releasedPrompts = new Map<number, NodeJS.Timeout>()
+  private disposed = false
   private pinRestoreRunning: Promise<void> | null = null
   private pinRestorePending = false
   private readonly advertisedPinOptions = new Set<PinKind>()
@@ -70,6 +81,7 @@ export class AcpTransport implements WebSessionTransport {
   }
 
   async start(): Promise<void> {
+    if (this.disposed) throw new Error('ACP session is not established')
     const init = await this.peer.request('initialize', {
       protocolVersion: ACP_PROTOCOL_VERSION,
       clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
@@ -116,10 +128,15 @@ export class AcpTransport implements WebSessionTransport {
   }
 
   async prompt(message: string): Promise<void> {
+    if (this.disposed) throw new Error('ACP session is not established')
     const text = message.trim()
     if (!text) throw new Error('prompt cannot be empty')
     if (!this.sessionId) throw new Error('ACP session is not established')
     if (this.turnActive) throw new Error(`${this.ctx.input.agent} is still working on the previous prompt`)
+    // A released turn is still running in the runtime and ACP updates carry no
+    // turn id; a replacement prompt could only be corrupted by its frames.
+    // The fence settles or fails the session within ACP_RELEASED_PROMPT_FENCE_MS.
+    if (this.releasedPrompts.size > 0) throw new Error(`${this.ctx.input.agent} is still settling the previous turn`)
     // Claim the turn before the first await: a second prompt can arrive while
     // the pin restore is in flight and must not pass the same check.
     this.turnActive = true
@@ -131,20 +148,34 @@ export class AcpTransport implements WebSessionTransport {
     try {
       await this.ensureConfigPin()
     } catch (error) {
-      this.turnActive = false
-      if (!this.ctx.channel.closed) this.ctx.state.fail(error instanceof Error ? error.message : String(error))
+      // A watchdog release or dispose can change the generation while the pin
+      // wait is in flight; a stale failure must not clear a newer turn.
+      if (turnGeneration === this.turnGeneration) {
+        this.turnActive = false
+        this.cancelRequested = false
+        this.clearCancelWatchdog()
+        if (!this.ctx.channel.closed) this.ctx.state.fail(error instanceof Error ? error.message : String(error))
+      }
       throw error
     }
     // A notification-triggered restore, cancel, or dispose can land while the
     // pin check awaits the runtime. Do not send a prompt into a cancelled or
-    // closed turn.
+    // closed turn. The generation check also catches a watchdog release: a new
+    // prompt may have claimed the turn while this one was still waiting, and
+    // this stale call must not send or clear the newer turn.
+    if (turnGeneration !== this.turnGeneration) {
+      throw new Error('the ACP turn was cancelled before the prompt was sent')
+    }
     if (!this.turnActive || this.cancelRequested || this.ctx.channel.closed || !this.sessionId) {
       this.turnActive = false
+      this.cancelRequested = false
+      this.clearCancelWatchdog()
       throw new Error('the ACP turn was cancelled before the prompt was sent')
     }
     this.ctx.state.error = null
     this.builder.user(text)
     this.ctx.state.setPhase('working')
+    this.promptOutstanding = true
     const turn = this.peer.request('session/prompt', {
       sessionId: this.sessionId,
       prompt: [{ type: 'text', text }],
@@ -156,15 +187,96 @@ export class AcpTransport implements WebSessionTransport {
   }
 
   async abort(): Promise<void> {
-    if (!this.sessionId) return
+    if (this.disposed || !this.sessionId || !this.turnActive) return
     // Keep turnActive as the single-turn guard; a dedicated flag lets a cancel
     // that lands during the pin restore suppress the prompt without allowing a
     // second prompt to start while the cancelled turn is still settling.
     this.cancelRequested = true
+    if (this.promptOutstanding) {
+      this.armCancelWatchdog()
+    } else {
+      // No session/prompt was sent, so there is nothing for the runtime to
+      // acknowledge. Release the claimed turn now; the post-pin generation
+      // guard suppresses the stale prompt when the pin restore settles.
+      this.releaseTurn(this.turnGeneration, new Error('cancelled before the prompt was sent'))
+    }
     await this.peer.notify('session/cancel', { sessionId: this.sessionId })
   }
 
+  /** Release a turn whose runtime ignored session/cancel. The generation check
+   *  makes a late settlement harmless; the fence blocks a replacement prompt
+   *  until that settlement or the fence deadline. */
+  private armCancelWatchdog(): void {
+    if (!this.turnActive || !this.promptOutstanding) return
+    // A repeated abort must not push the deadline back indefinitely.
+    if (this.cancelWatchdog) return
+    const generation = this.turnGeneration
+    this.cancelWatchdog = setTimeout(() => {
+      this.cancelWatchdog = null
+      if (!this.turnActive || !this.cancelRequested || !this.promptOutstanding
+        || generation !== this.turnGeneration) return
+      const message = `${this.ctx.input.agent} did not acknowledge session/cancel; releasing the turn`
+      this.ctx.logger.warn(message)
+      // finishTurn leaves the phase idle with the error set, so the composer
+      // stays usable; `failed` is reserved for a dead process.
+      try {
+        this.releaseTurn(generation, new Error(message))
+      } catch (error) {
+        // A throwing host state listener must not crash the timer; releaseTurn
+        // has already fenced the zombie prompt, and the fence deadline will
+        // fail the session if it never settles.
+        this.ctx.logger.warn('web_session.cancel_watchdog_failed', { error })
+      }
+    }, ACP_CANCEL_WATCHDOG_MS)
+    this.cancelWatchdog.unref?.()
+  }
+
+  /** Release a turn whose prompt is still outstanding and fence its frames. */
+  private releaseTurn(generation: number, error: Error): void {
+    // Only a turn that already sent session/prompt can leave a zombie prompt.
+    // A pin failure during the pre-prompt wait has nothing to settle, so
+    // fencing it would fail a healthy session after the timeout.
+    const promptSent = this.promptOutstanding && generation === this.turnGeneration
+    try {
+      this.finishTurn(null, error, generation)
+    } finally {
+      // finishTurn notifies host state listeners synchronously; if one throws,
+      // the zombie prompt must still be fenced before the error propagates.
+      if (promptSent) this.fenceReleasedPrompt(generation)
+    }
+  }
+
+  private fenceReleasedPrompt(generation: number): void {
+    const timer = setTimeout(() => {
+      this.releasedPrompts.delete(generation)
+      const message = `${this.ctx.input.agent} did not settle the cancelled turn; restart the session`
+      this.ctx.logger.warn(message)
+      try {
+        if (!this.ctx.channel.closed) this.ctx.state.fail(message)
+        // The transport cannot close the host's child process; ask the host to
+        // stop the session so a plain reopen creates a fresh one. Host code may
+        // throw; the transport must still dispose.
+        this.ctx.onFatal(message)
+      } catch (error) {
+        // This runs in a timer callback; a throwing host hook must not crash
+        // the server. Dispose below regardless.
+        this.ctx.logger.warn('web_session.fatal_callback_failed', { error })
+      } finally {
+        this.dispose()
+      }
+    }, ACP_RELEASED_PROMPT_FENCE_MS)
+    timer.unref?.()
+    this.releasedPrompts.set(generation, timer)
+  }
+
+  private clearCancelWatchdog(): void {
+    if (!this.cancelWatchdog) return
+    clearTimeout(this.cancelWatchdog)
+    this.cancelWatchdog = null
+  }
+
   async configure(configId: string, value: string): Promise<void> {
+    if (this.disposed) throw new Error('ACP session is not established')
     if (!this.sessionId) throw new Error('ACP session is not established')
     const option = this.ctx.state.configOptions.find((entry) => entry.id === configId)
     if (!option) throw new Error(`config option ${configId} is not offered by ${this.ctx.input.agent}`)
@@ -188,6 +300,8 @@ export class AcpTransport implements WebSessionTransport {
   }
 
   async respond(requestId: string, optionId: string): Promise<void> {
+    if (this.disposed) throw new Error('ACP session stopped')
+    if (this.cancelRequested) throw new Error('the turn is cancelling; wait for it to settle')
     const request = this.ctx.state.requests.find((r) => r.id === requestId)
     const pending = this.permissions.get(requestId)
     if (!request || !pending) throw new Error(`no pending request ${requestId}`)
@@ -212,7 +326,7 @@ export class AcpTransport implements WebSessionTransport {
       this.ctx.logger.warn(message)
       if (this.turnActive && generation === this.turnGeneration && !this.ctx.channel.closed) {
         void this.abort().catch(() => undefined)
-        this.finishTurn(null, new Error(message), generation)
+        this.releaseTurn(generation, new Error(message))
         this.ctx.state.fail(message)
       }
       throw error
@@ -224,17 +338,31 @@ export class AcpTransport implements WebSessionTransport {
 
   dispose(): void {
     // Invalidate any in-flight prompt settlement before disposing.
+    this.disposed = true
     this.turnGeneration += 1
     this.turnActive = false
     this.cancelRequested = false
+    this.promptOutstanding = false
+    for (const timer of this.releasedPrompts.values()) clearTimeout(timer)
+    this.releasedPrompts.clear()
+    this.clearCancelWatchdog()
     this.cancelPermissions()
     this.peer.dispose(new Error('ACP session stopped'))
   }
 
-  private finishTurn(stopReason: string | null, error: Error | null, generation = this.turnGeneration): void {
+  private finishTurn(stopReason: string | null, error: Error | null, generation: number): void {
+    // The released turn's eventual settlement ends its fence, but it must not
+    // touch the turn that replaced it.
+    const fenceTimer = this.releasedPrompts.get(generation)
+    if (fenceTimer) {
+      clearTimeout(fenceTimer)
+      this.releasedPrompts.delete(generation)
+    }
     // A cancelled prompt can settle after the turn was already finalized and
     // a new prompt started. Ignore that stale settlement.
     if (generation !== this.turnGeneration) return
+    this.clearCancelWatchdog()
+    this.promptOutstanding = false
     this.turnGeneration += 1
     this.turnActive = false
     this.cancelRequested = false
@@ -255,10 +383,16 @@ export class AcpTransport implements WebSessionTransport {
   }
 
   private onNotification(method: string, params: unknown): void {
+    if (this.disposed) return
     if (method !== 'session/update' || !isJsonObject(params)) return
     const update = params['update']
     if (!isJsonObject(update)) return
     const kind = update['sessionUpdate']
+    // A released turn is still running in the runtime. Its turn content must
+    // not leak into the replacement turn; runtime-level config updates still
+    // flow so the pin invariant is restored.
+    if (this.releasedPrompts.size > 0
+      && kind !== 'config_option_update' && kind !== 'current_mode_update') return
     if (kind !== 'user_message_chunk') this.flushUser()
     switch (kind) {
       case 'user_message_chunk':
@@ -327,7 +461,7 @@ export class AcpTransport implements WebSessionTransport {
         void this.abort().catch((abortError: unknown) => {
           this.ctx.logger.warn(`could not cancel the drifted ${this.ctx.input.agent} turn: ${abortError instanceof Error ? abortError.message : String(abortError)}`)
         })
-        this.finishTurn(null, new Error(message), generation)
+        this.releaseTurn(generation, new Error(message))
         this.ctx.state.fail(message)
       }
     })
@@ -479,7 +613,14 @@ export class AcpTransport implements WebSessionTransport {
   }
 
   private async onRequest(method: string, params: unknown, id: string | number): Promise<unknown> {
+    if (this.disposed) throw new Error('ACP session stopped')
     if (method === 'session/request_permission' && isJsonObject(params)) {
+      // A permission request from a cancelled or released (zombie) turn must
+      // not drive the live session; answer it as cancelled.
+      if (this.cancelRequested || this.releasedPrompts.size > 0) {
+        this.ctx.logger.warn(`${this.ctx.input.agent} requested permission for a cancelled turn; cancelling it`)
+        return { outcome: { outcome: 'cancelled' } }
+      }
       return this.requestPermission(params, id)
     }
     const error = new Error(`OpenAlice does not implement ${method}`) as Error & { code: number }

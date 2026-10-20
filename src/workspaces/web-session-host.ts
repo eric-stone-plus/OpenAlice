@@ -106,6 +106,15 @@ export class WebSessionHost {
           this.callbacks.onExit?.(input.recordId, reason)
         },
         onNativeSessionId: (id) => { if (this.sessions.get(input.recordId) === session) this.callbacks.onNativeSessionId?.(input.recordId, id) },
+        onFatal: (message) => {
+          if (this.sessions.get(input.recordId) !== session) return
+          void this.stopFatal(input.recordId, `fatal: ${message}`).catch((error: unknown) => {
+            // stopFatal evicts the record even when termination fails, so a
+            // reopen starts a fresh process; a child that survived SIGKILL
+            // cannot be reaped anyway.
+            this.logger.warn('web_session.fatal_stop_failed', { recordId: input.recordId, error })
+          })
+        },
       },
     )
     this.sessions.set(input.recordId, session)
@@ -152,6 +161,21 @@ export class WebSessionHost {
     return true
   }
 
+  /** Stop a session whose transport failed and cannot recover in place. The
+   *  non-intentional exit marks it failed, reaches the execution journal, and
+   *  evicts the record so a reopen creates a fresh process. */
+  async stopFatal(recordId: string, reason: string): Promise<void> {
+    const session = this.sessions.get(recordId)
+    if (!session) return
+    try {
+      await session.stop(reason, true)
+    } finally {
+      // A fatal stop must not leave an unrecoverable record even when the
+      // process tree survives termination; a reopen creates a fresh process.
+      if (this.sessions.get(recordId) === session) this.sessions.delete(recordId)
+    }
+  }
+
   async stopAll(reason = 'host disposed'): Promise<void> {
     const sessions = Array.from(this.sessions.values())
     this.sessions.clear()
@@ -173,6 +197,7 @@ class LiveWebSession {
   private readonly transport: WebSessionTransport
   private stderrTail = ''
   private intentionalStop = false
+  private fatalStop = false
   private exited = false
   private startupComplete = false
   private readonly startedAt = Date.now()
@@ -185,6 +210,7 @@ class LiveWebSession {
     private readonly callbacks: {
       onExit: (reason: WebSessionExitReason) => void
       onNativeSessionId: (id: string) => void
+      onFatal?: (message: string) => void
     },
   ) {
     let lastNativeId: string | null = input.nativeSessionId ?? null
@@ -197,7 +223,18 @@ class LiveWebSession {
     })
     if (input.nativeSessionId) this.state.nativeSessionId = input.nativeSessionId
     this.channel = new ChildJsonlChannel(child, logger)
-    this.transport = factory({ input, state: this.state, channel: this.channel, logger })
+    this.transport = factory({
+      input,
+      state: this.state,
+      channel: this.channel,
+      logger,
+      // A transport that cannot recover in place asks the host to stop the
+      // session, so the child is terminated and a reopen creates a fresh one.
+      onFatal: (message) => {
+        logger.warn('web_session.fatal', { message })
+        this.callbacks.onFatal?.(message)
+      },
+    })
   }
 
   async start(): Promise<void> {
@@ -269,9 +306,11 @@ class LiveWebSession {
     return this.transport.configure(configId, value)
   }
 
-  async stop(reason: string): Promise<void> {
+  async stop(reason: string, fatal = false): Promise<void> {
     if (this.exited) { await this.child.terminateTree?.(); return }
-    this.intentionalStop = true
+    if (fatal) this.fatalStop = true
+    // A later non-fatal stop must not hide an earlier fatal marking.
+    this.intentionalStop = !fatal && !this.fatalStop
     this.logger.info('web_session.stopping', { reason })
     try {
       this.transport.dispose?.()
@@ -330,7 +369,10 @@ class LiveWebSession {
     this.state.clearRequests()
     this.state.bump()
     this.logger.info('web_session.exited', { code, signal, intentional: this.intentionalStop })
-    this.finishExecution({ reason: `child-exit:${code}:${signal ?? 'none'}`, failed: !this.intentionalStop && code !== 0 })
+    this.finishExecution({
+      reason: `child-exit:${code}:${signal ?? 'none'}`,
+      failed: this.fatalStop || (!this.intentionalStop && code !== 0),
+    })
     this.callbacks.onExit({ code, signal, intentional: this.intentionalStop, startupFailed: !this.startupComplete })
   }
 }

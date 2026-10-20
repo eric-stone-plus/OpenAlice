@@ -152,6 +152,9 @@ export interface WebTransportContext {
   readonly state: WebSessionState
   readonly channel: JsonlChannel
   readonly logger: Logger
+  /** Stop a session that cannot be recovered in place. The host must terminate
+   *  the child and record the stop as failed even if it exits with code 0. */
+  readonly onFatal: (message: string) => void
 }
 
 /**

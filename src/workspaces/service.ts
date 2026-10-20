@@ -512,7 +512,7 @@ export interface WorkspaceService {
   readonly creator: WorkspaceCreator;
   readonly pool: SessionPoolView;
   /** Long-lived structured Agent processes presented in the browser (Web surface). */
-  readonly web: Omit<WebSessionHost, 'start' | 'stop' | 'stopAll'>;
+  readonly web: Omit<WebSessionHost, 'start' | 'stop' | 'stopAll' | 'stopFatal'>;
   readonly executions: {
     terminal(wsId: string, context: SessionFactoryContext, origin: ExecutionOrigin): Promise<SessionView>;
     web(meta: WorkspaceMeta, record: SessionRecord, origin: ExecutionOrigin, opts?: { appendSystemPrompt?: string; skills?: readonly string[]; approveProject?: boolean; runtimeSelection?: SessionRuntimeSelection; agentMode?: string }): Promise<WebSessionSnapshot>;

@@ -686,6 +686,28 @@ describe('Codex question answers', () => {
 })
 
 
+it('stops and evicts a session whose transport reports a fatal failure', async () => {
+  const transport = {
+    start: vi.fn(async () => undefined),
+    prompt: vi.fn(async () => undefined),
+    abort: vi.fn(async () => undefined),
+    respond: vi.fn(async () => undefined),
+    dispose: vi.fn(),
+  }
+  let fatal: ((message: string) => void) | undefined
+  const process = new FakeProcess(() => undefined)
+  const host = new WebSessionHost(logger, {}, () => process as never, {
+    'pi-rpc': (ctx: { onFatal?: (message: string) => void }) => { fatal = ctx.onFatal; return transport },
+  } as never)
+  await host.start(input({}))
+  expect(fatal).toBeDefined()
+
+  fatal?.('boom')
+  await settle()
+  expect(transport.dispose).toHaveBeenCalled()
+  expect(host.has('record-1')).toBe(false)
+})
+
 it('preserves the child diagnostic when ACP exits during its handshake', async () => {
   const exit = vi.fn()
   const process = new FakeProcess((_command, self) => {
