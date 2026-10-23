@@ -3,6 +3,7 @@ import { setLaunchPreview, getLaunchPreview } from '../conversation/launch-previ
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { useWebConversation } from './useWebConversation'
+import { INTERRUPTED_MESSAGE } from '../../lib/errors'
 import type { WebSessionSnapshot } from './api'
 const api = vi.hoisted(() => ({ getWebSession: vi.fn(), openWebSession: vi.fn() }))
 vi.mock('./api', () => ({ ...api, abortWebSession: vi.fn(), promptWebSession: vi.fn(), respondWebSession: vi.fn() }))
@@ -20,6 +21,16 @@ describe('Web Session restart', () => {
     await act(async () => resolve(snapshot(1)))
     expect(result.current.items).toEqual([])
     expect(getLaunchPreview('workspace', 'session')).toBeNull()
+  })
+  it('keeps the friendly interruption copy across an unchanged poll', async () => {
+    api.getWebSession
+      .mockResolvedValueOnce({ ...snapshot(1), error: 'The operation was aborted.' } as WebSessionSnapshot)
+      .mockResolvedValueOnce(null)
+    const { result } = renderHook(() => useWebConversation('workspace', 'session'))
+    await waitFor(() => expect(result.current.snapshot?.revision).toBe(1))
+    expect(result.current.error).toBe(INTERRUPTED_MESSAGE)
+    await act(async () => { await result.current.refresh() })
+    expect(result.current.error).toBe(INTERRUPTED_MESSAGE)
   })
   it('accepts a new process revision and ignores an old in-flight poll', async () => {
     api.getWebSession.mockResolvedValue(snapshot(50))

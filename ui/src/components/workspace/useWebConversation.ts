@@ -13,6 +13,12 @@ import {
   type WebSessionSnapshot,
 } from './api'
 import { presentWebTranscript } from './web-presentation'
+import { INTERRUPTED_MESSAGE, isAbortError, isAbortMessage } from '../../lib/errors'
+
+function presentError(message: string | null | undefined): string | null {
+  if (!message) return null
+  return isAbortMessage(message) ? INTERRUPTED_MESSAGE : message
+}
 
 /**
  * Live view of one Web conversation. Polls faster while the runtime works and
@@ -36,7 +42,7 @@ export function useWebConversation(wsId: string, sessionId: string, readOnly = f
     if (!alive.current || (current.current && next.revision < current.current.revision)) return
     current.current = next
     setSnapshot(next)
-    setError(next.error)
+    setError(presentError(next.error))
   }, [])
   const refresh = useCallback(async () => {
     if (readOnly || restarting.current) return
@@ -45,8 +51,11 @@ export function useWebConversation(wsId: string, sessionId: string, readOnly = f
       const next = await getWebSession(wsId, sessionId, current.current?.revision)
       if (epoch !== generation.current) return
       if (next) accept(next)
-      else if (alive.current) setError(current.current?.error ?? null)
-    } catch (error) { if (alive.current && epoch === generation.current) setError(error instanceof Error ? error.message : String(error)) }
+      else if (alive.current) setError(presentError(current.current?.error))
+    } catch (error) {
+      if (isAbortError(error)) return
+      if (alive.current && epoch === generation.current) setError(error instanceof Error ? error.message : String(error))
+    }
   }, [accept, wsId, sessionId, readOnly])
   useEffect(() => {
     alive.current = true

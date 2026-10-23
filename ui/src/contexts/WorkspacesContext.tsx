@@ -31,6 +31,7 @@ import '../components/workspace/workspaces.css'
 
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { useToast } from '../components/Toast'
+import { isAbortError } from '../lib/errors'
 import {
   publishTerminalViewAttributes,
   useTerminalAppearance,
@@ -713,7 +714,9 @@ export function WorkspacesProvider({ children, renderContent }: { children: Reac
       await apiSetSessionPresence(wsId, resumeId, presence)
       void refresh()
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : t('workspace.sessionPresenceFailed'))
+      toast.error(err instanceof Error && !isAbortError(err)
+        ? err.message
+        : t('workspace.sessionPresenceFailed'))
       throw err
     }
   }, [refresh, t, toast])

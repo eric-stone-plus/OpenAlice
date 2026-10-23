@@ -3,6 +3,7 @@ import { ConversationLayout } from './ConversationLayout'
 import { ChatComposer, type ChatComposerProps } from './ChatComposer'
 import { ConversationTranscriptItem } from './ConversationTranscript'
 import type { ConversationItem } from './types'
+import { INTERRUPTED_MESSAGE, isAbortError } from '../../lib/errors'
 import './conversation.css'
 
 export interface ConversationViewProps {
@@ -30,6 +31,11 @@ export interface ConversationViewProps {
 
 export function isConversationNearBottom(metrics: Pick<HTMLElement, 'scrollTop' | 'scrollHeight' | 'clientHeight'>, threshold = 72): boolean {
   return metrics.scrollHeight - metrics.clientHeight - metrics.scrollTop <= threshold
+}
+
+function actionErrorMessage(error: unknown): string {
+  if (isAbortError(error)) return INTERRUPTED_MESSAGE
+  return error instanceof Error ? error.message : String(error)
 }
 
 /** No runtime protocol, polling or workspace knowledge belongs in this view. */
@@ -78,7 +84,7 @@ export function ConversationView(props: ConversationViewProps) {
       await props.send(message)
       if (mounted.current) { setDraft(''); jump('auto') }
     } catch (error) {
-      if (mounted.current) setActionError(error instanceof Error ? error.message : String(error))
+      if (mounted.current) setActionError(actionErrorMessage(error))
     } finally {
       pendingRef.current = false
       if (mounted.current) setPending(false)
@@ -92,7 +98,7 @@ export function ConversationView(props: ConversationViewProps) {
     setActionError(null)
     setStopped(true)
     try { await props.stop() }
-    catch (error) { if (mounted.current) setActionError(error instanceof Error ? error.message : String(error)) }
+    catch (error) { if (mounted.current) setActionError(actionErrorMessage(error)) }
     finally { pendingRef.current = false; if (mounted.current) setPending(false) }
   }
 
