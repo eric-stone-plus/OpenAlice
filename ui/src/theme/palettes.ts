@@ -61,9 +61,11 @@ export function paletteAppearance(palette: ThemePaletteId): ThemePaletteAppearan
 
 export function resolveEffectiveSlot(
   preference: ThemePreferenceMode,
-  systemDark: boolean,
+  _systemDark: boolean,
 ): ThemePreferenceSlot {
-  if (preference === 'auto') return systemDark ? 'night' : 'day'
+  // Auto is pinned to Night: the product treats Auto as "dark by default"
+  // instead of following the host OS light/dark preference.
+  if (preference === 'auto') return 'night'
   return preference
 }
 

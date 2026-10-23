@@ -30,5 +30,32 @@ export function createAppWindow(preload: string, title = 'OpenAlice'): AppWindow
   // default limit of 10 is below the current combined count.
   win.setMaxListeners(20)
   configureWindowChrome(win)
+  installZoomShortcuts(win)
   return { window: win }
+}
+
+const ZOOM_STEP = 0.5
+const MIN_ZOOM_LEVEL = -3
+const MAX_ZOOM_LEVEL = 5
+
+/**
+ * The custom chrome replaces the native menu, so Chromium's default zoom
+ * accelerators are not installed. Bind Ctrl/Cmd + `+` / `-` / `0` directly on
+ * the window; `setZoomLevel` also persists the origin's zoom in the session.
+ */
+function installZoomShortcuts(win: BrowserWindow): void {
+  win.webContents.on('before-input-event', (event, input) => {
+    if (input.type !== 'keyDown' || (!input.control && !input.meta) || input.alt) return
+    const contents = win.webContents
+    if (input.key === '+' || input.key === '=') {
+      event.preventDefault()
+      contents.setZoomLevel(Math.min(contents.getZoomLevel() + ZOOM_STEP, MAX_ZOOM_LEVEL))
+    } else if (input.key === '-' || input.key === '_') {
+      event.preventDefault()
+      contents.setZoomLevel(Math.max(contents.getZoomLevel() - ZOOM_STEP, MIN_ZOOM_LEVEL))
+    } else if (input.key === '0') {
+      event.preventDefault()
+      contents.setZoomLevel(0)
+    }
+  })
 }

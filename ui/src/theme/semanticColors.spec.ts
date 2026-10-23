@@ -164,11 +164,11 @@ describe('semantic color contract', () => {
   })
 
   it('assigns any palette to either preference slot', () => {
-    expect(resolveEffectiveSlot('auto', false)).toBe('day')
+    expect(resolveEffectiveSlot('auto', false)).toBe('night')
     expect(resolveEffectiveSlot('auto', true)).toBe('night')
     expect(resolveEffectiveSlot('day', true)).toBe('day')
     expect(resolveEffectiveSlot('night', false)).toBe('night')
-    expect(resolveEffectivePalette('auto', false, 'porcelain', 'midnight')).toBe('porcelain')
+    expect(resolveEffectivePalette('auto', false, 'porcelain', 'midnight')).toBe('midnight')
     expect(resolveEffectivePalette('auto', true, 'porcelain', 'midnight')).toBe('midnight')
     expect(resolveEffectivePalette('day', true, 'midnight', 'paper')).toBe('midnight')
     expect(resolveEffectivePalette('night', false, 'midnight', 'paper')).toBe('paper')

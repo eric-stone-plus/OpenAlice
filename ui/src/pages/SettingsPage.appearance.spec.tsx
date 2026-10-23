@@ -70,19 +70,19 @@ describe('AppearanceSection palette pair editor', () => {
     expect(useThemeStore.getState().dayPalette).toBe('paper')
     expect(useThemeStore.getState().nightPalette).toBe('graphite')
     expect(useThemeStore.getState().stylePaletteMode).toBe('recommended')
-    expect(screen.getByText('Currently using Day · Windows Classic')).toBeTruthy()
+    expect(screen.getByText('Currently using Night · Windows Classic')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Use saved colors' }).getAttribute('aria-pressed'))
       .toBe('true')
 
     fireEvent.click(screen.getByRole('radio', { name: 'Default' }))
-    expect(screen.getByText('Currently using Day · Paper')).toBeTruthy()
+    expect(screen.getByText('Currently using Night · Graphite')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Edit Day palette: Paper' })).toBeTruthy()
 
     fireEvent.click(screen.getByRole('radio', { name: 'Windows 98' }))
-    expect(screen.getByText('Currently using Day · Windows Classic')).toBeTruthy()
+    expect(screen.getByText('Currently using Night · Windows Classic')).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: 'Use saved colors' }))
     expect(useThemeStore.getState().stylePaletteMode).toBe('saved')
-    expect(screen.getByText('Currently using Day · Paper')).toBeTruthy()
+    expect(screen.getByText('Currently using Night · Graphite')).toBeTruthy()
   })
 
   it('does not expose the retired editor tab strip preference', () => {
@@ -99,8 +99,8 @@ describe('AppearanceSection palette pair editor', () => {
   it('keeps the palette library collapsed until the user asks to customize it', () => {
     render(<AppearanceSection />)
 
-    expect(screen.getByText('Currently using Day · Paper')).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Edit Day palette: Paper' }).getAttribute('aria-pressed'))
+    expect(screen.getByText('Currently using Night · Graphite')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Edit Night palette: Graphite' }).getAttribute('aria-pressed'))
       .toBe('true')
     const disclosure = screen.getByRole('button', { name: 'Customize palettes' })
     const editor = document.getElementById(disclosure.getAttribute('aria-controls') ?? '')
@@ -120,9 +120,9 @@ describe('AppearanceSection palette pair editor', () => {
       .toBe('true')
     expect(screen.getByRole('button', { name: 'Recommended' }).className).toContain('min-h-10')
     expect(screen.getByRole('button', { name: 'Reset pair' }).className).toContain('min-h-10')
-    expect(screen.getByRole('button', { name: 'Choose Paper' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Choose Linen' })).toBeTruthy()
-    expect(screen.queryByRole('button', { name: 'Choose Graphite' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Choose Graphite' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Choose Midnight' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Choose Paper' })).toBeNull()
   })
 
   it('switches the editor to Night and updates only the Night slot', () => {
@@ -164,8 +164,7 @@ describe('AppearanceSection palette pair editor', () => {
     expect(useThemeStore.getState().nightPalette).toBe('graphite')
   })
 
-  it('reports the Night slot as active when Auto follows a dark system', () => {
-    systemDark = true
+  it('reports the Night slot as active for Auto', () => {
     render(<AppearanceSection />)
 
     expect(screen.getByText('Currently using Night · Graphite')).toBeTruthy()
@@ -177,6 +176,7 @@ describe('AppearanceSection palette pair editor', () => {
     render(<AppearanceSection />)
 
     fireEvent.click(screen.getByRole('button', { name: 'Customize palettes' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Edit Day palette: Paper' }))
     fireEvent.click(screen.getByRole('button', { name: 'Choose Linen' }))
     fireEvent.click(screen.getByRole('button', { name: 'Hide palette editor' }))
 

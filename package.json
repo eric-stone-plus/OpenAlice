@@ -209,6 +209,11 @@
       "maintainer": "OpenAlice Contributors <openalice@users.noreply.github.com>",
       "vendor": "OpenAlice Contributors",
       "synopsis": "File-based trading agent workspace",
+      "desktop": {
+        "entry": {
+          "Keywords": "alice;openalice;open alice;trading;agent;"
+        }
+      },
       "syncDesktopName": true
     },
     "deb": {
@@ -226,7 +231,8 @@
       ],
       "desktop": {
         "entry": {
-          "Icon": "/opt/OpenAlice/resources/launcher-icon.png"
+          "Icon": "/opt/OpenAlice/resources/launcher-icon.png",
+          "Keywords": "alice;openalice;open alice;trading;agent;"
         }
       }
     },
@@ -244,7 +250,8 @@
       ],
       "desktop": {
         "entry": {
-          "Icon": "/opt/OpenAlice/resources/launcher-icon.png"
+          "Icon": "/opt/OpenAlice/resources/launcher-icon.png",
+          "Keywords": "alice;openalice;open alice;trading;agent;"
         }
       }
     },

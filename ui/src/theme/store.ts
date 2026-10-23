@@ -20,10 +20,9 @@ import {
 /**
  * Color-mode and palette-pairing store.
  *
- * `'auto'` follows the OS (`prefers-color-scheme`); `'day'` / `'night'` pin a
- * preference slot. Default is `'auto'` — unlike the locale store (which deliberately does
- * NOT auto-detect), a color theme SHOULD honor the user's system setting out
- * of the box; that's the whole point of the mode.
+ * `'auto'` always uses the Night slot; `'day'` / `'night'` pin a preference
+ * slot. Default is `'auto'` — the product treats Auto as "dark by default"
+ * instead of following the host OS light/dark preference.
  *
  * The storage key remains v1 so existing device preferences survive. Store
  * version 2 separates a style's optional recommended colors from the saved

@@ -1,5 +1,3 @@
-import { useCallback, useMemo, useSyncExternalStore } from 'react'
-
 import { useThemeStore } from './store'
 import {
   paletteAppearance,
@@ -9,28 +7,12 @@ import {
 } from './palettes'
 
 /**
- * Resolve which preference slot is active. Auto follows the OS; a palette's
- * own light/dark appearance does not influence slot selection.
+ * Resolve which preference slot is active. Auto always selects Night; a
+ * palette's own light/dark appearance does not influence slot selection.
  */
 export function useEffectivePreferenceSlot(): ThemePreferenceSlot {
   const theme = useThemeStore((s) => s.theme)
-  const mediaQuery = useMemo(
-    () => typeof window !== 'undefined' && typeof window.matchMedia === 'function'
-      ? window.matchMedia('(prefers-color-scheme: dark)')
-      : null,
-    [],
-  )
-  const subscribeSystem = useCallback((callback: () => void) => {
-    mediaQuery?.addEventListener('change', callback)
-    return () => mediaQuery?.removeEventListener('change', callback)
-  }, [mediaQuery])
-  const getSystemDark = useCallback(() => mediaQuery?.matches ?? false, [mediaQuery])
-  const systemDark = useSyncExternalStore(
-    subscribeSystem,
-    getSystemDark,
-    () => true,
-  )
-  return resolveEffectiveSlot(theme, systemDark)
+  return resolveEffectiveSlot(theme, false)
 }
 
 /** The concrete semantic card selected for the currently active slot. */

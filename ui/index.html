@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="auto" data-palette="codex" data-day-palette="codex" data-night-palette="graphite" data-ui-style="default" data-style-palette-mode="saved">
+<html lang="en" data-theme="auto" data-palette="graphite" data-day-palette="codex" data-night-palette="graphite" data-ui-style="default" data-style-palette-mode="saved">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
@@ -38,9 +38,7 @@
           var styleRecommended = stylePaletteMode === 'recommended' && uiStyle === 'win98';
           var effectiveDay = styleRecommended ? 'windows-classic' : day;
           var effectiveNight = styleRecommended ? 'windows-classic' : night;
-          var effective = t === 'auto'
-            ? (matchMedia('(prefers-color-scheme: dark)').matches ? 'night' : 'day')
-            : t;
+          var effective = t === 'auto' ? 'night' : t;
           var root = document.documentElement;
           root.dataset.theme = t;
           root.dataset.dayPalette = day;
@@ -55,7 +53,7 @@
           root.dataset.nightPalette = 'graphite';
           root.dataset.uiStyle = 'default';
           root.dataset.stylePaletteMode = 'saved';
-          root.dataset.palette = 'codex';
+          root.dataset.palette = 'graphite';
         }
       })();
     </script>

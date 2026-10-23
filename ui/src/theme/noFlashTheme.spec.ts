@@ -60,9 +60,9 @@ describe('no-flash theme bootstrap', () => {
     }, false).palette).toBe('paper')
   })
 
-  it('uses the system only to select a slot in Auto', () => {
+  it('pins Auto to the Night slot', () => {
     const state = { theme: 'auto', dayPalette: 'linen', nightPalette: 'iris' }
-    expect(applyNoFlashTheme(state, false).palette).toBe('linen')
+    expect(applyNoFlashTheme(state, false).palette).toBe('iris')
     expect(applyNoFlashTheme(state, true).palette).toBe('iris')
   })
 
@@ -106,8 +106,8 @@ describe('no-flash theme bootstrap', () => {
   })
 })
 
-it('starts with Codex by day and Graphite by night while preserving saved Paper', () => {
-  expect(applyNoFlashTheme({}, false).palette).toBe('codex')
+it('starts Auto on Graphite while Day keeps its saved Paper', () => {
+  expect(applyNoFlashTheme({}, false).palette).toBe('graphite')
   expect(applyNoFlashTheme({}, true).palette).toBe('graphite')
-  expect(applyNoFlashTheme({ dayPalette: 'paper' }, false).palette).toBe('paper')
+  expect(applyNoFlashTheme({ theme: 'day', dayPalette: 'paper' }, false).palette).toBe('paper')
 })

@@ -221,7 +221,7 @@ export function AppearanceSection({ standalone = false }: { standalone?: boolean
           </span>
           {theme === 'auto' && (
             <span className="oa-palette-preview-muted ml-1 shrink-0">
-              {t('settings.appearance.followsSystem')}
+              {t('settings.appearance.autoUsesNight')}
             </span>
           )}
         </div>

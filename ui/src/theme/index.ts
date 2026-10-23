@@ -16,8 +16,6 @@ import { resolveEffectivePalette } from './palettes'
 import { useThemeStore, readInitialThemePreferences } from './store'
 import { UI_STYLE_PROFILES, type UiStyleProfileDefinition } from './styleProfiles'
 
-const systemTheme = window.matchMedia('(prefers-color-scheme: dark)')
-
 function applyTheme(state: ReturnType<typeof readInitialThemePreferences>): void {
   const root = document.documentElement
   const styleDefinition: UiStyleProfileDefinition | undefined = UI_STYLE_PROFILES.find(
@@ -33,7 +31,7 @@ function applyTheme(state: ReturnType<typeof readInitialThemePreferences>): void
   root.dataset.stylePaletteMode = state.stylePaletteMode
   root.dataset.palette = resolveEffectivePalette(
     state.theme,
-    systemTheme.matches,
+    false,
     stylePalettePair?.day ?? state.dayPalette,
     stylePalettePair?.night ?? state.nightPalette,
   )
@@ -49,9 +47,4 @@ useThemeStore.subscribe((state, prev) => {
     || state.uiStyle !== prev.uiStyle
     || state.stylePaletteMode !== prev.stylePaletteMode
   ) applyTheme(state)
-})
-
-systemTheme.addEventListener('change', () => {
-  const state = useThemeStore.getState()
-  if (state.theme === 'auto') applyTheme(state)
 })
