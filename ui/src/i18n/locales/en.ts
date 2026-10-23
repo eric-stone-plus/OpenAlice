@@ -769,7 +769,6 @@ export const en = {
       nightPalette: 'Night palette',
       nightPaletteDescription: 'Used for Auto and Night. Choose any palette.',
       currentPalette: 'Currently using {{slot}} · {{palette}}',
-      autoUsesNight: 'uses Night',
       themePair: 'Day & Night colors',
       themePairDescription: 'Your saved Day and Night colors. Auto uses the Night colors. Style recommendations never overwrite them.',
       customizePalettes: 'Customize palettes',

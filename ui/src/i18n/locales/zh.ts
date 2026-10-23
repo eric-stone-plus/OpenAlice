@@ -754,7 +754,6 @@ export const zh: Resources = {
       nightPalette: '暗夜色卡',
       nightPaletteDescription: '用于自动模式和暗夜模式；可选择任意色卡。',
       currentPalette: '当前使用{{slot}} · {{palette}}',
-      autoUsesNight: '使用暗夜',
       themePair: '日间与暗夜配色',
       themePairDescription: '你保存的日间与暗夜配色；自动模式使用暗夜配色。样式推荐色不会覆盖它们。',
       customizePalettes: '自定义配色',

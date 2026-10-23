@@ -751,7 +751,6 @@ export const ja: Resources = {
       nightPalette: '夜用パレット',
       nightPaletteDescription: '自動と夜モードで使います。どのパレットでも選べます。',
       currentPalette: '現在は{{slot}} · {{palette}}を使用中',
-      autoUsesNight: '夜を使用',
       themePair: '昼と夜の配色',
       themePairDescription: '保存した昼と夜の配色です。自動は夜の配色を使います。スタイルのおすすめ配色は上書きしません。',
       customizePalettes: 'パレットをカスタマイズ',

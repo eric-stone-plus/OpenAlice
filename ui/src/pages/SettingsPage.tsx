@@ -219,11 +219,6 @@ export function AppearanceSection({ standalone = false }: { standalone?: boolean
               palette: t(activePaletteDefinition.labelKey),
             })}
           </span>
-          {theme === 'auto' && (
-            <span className="oa-palette-preview-muted ml-1 shrink-0">
-              {t('settings.appearance.autoUsesNight')}
-            </span>
-          )}
         </div>
       </div>
 

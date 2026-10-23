@@ -12,7 +12,7 @@ import {
  */
 export function useEffectivePreferenceSlot(): ThemePreferenceSlot {
   const theme = useThemeStore((s) => s.theme)
-  return resolveEffectiveSlot(theme, false)
+  return resolveEffectiveSlot(theme)
 }
 
 /** The concrete semantic card selected for the currently active slot. */

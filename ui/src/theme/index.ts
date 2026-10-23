@@ -31,7 +31,6 @@ function applyTheme(state: ReturnType<typeof readInitialThemePreferences>): void
   root.dataset.stylePaletteMode = state.stylePaletteMode
   root.dataset.palette = resolveEffectivePalette(
     state.theme,
-    false,
     stylePalettePair?.day ?? state.dayPalette,
     stylePalettePair?.night ?? state.nightPalette,
   )

@@ -59,10 +59,7 @@ export function paletteAppearance(palette: ThemePaletteId): ThemePaletteAppearan
   return THEME_PALETTES.find(({ id }) => id === palette)!.appearance
 }
 
-export function resolveEffectiveSlot(
-  preference: ThemePreferenceMode,
-  _systemDark: boolean,
-): ThemePreferenceSlot {
+export function resolveEffectiveSlot(preference: ThemePreferenceMode): ThemePreferenceSlot {
   // Auto is pinned to Night: the product treats Auto as "dark by default"
   // instead of following the host OS light/dark preference.
   if (preference === 'auto') return 'night'
@@ -71,9 +68,8 @@ export function resolveEffectiveSlot(
 
 export function resolveEffectivePalette(
   preference: ThemePreferenceMode,
-  systemDark: boolean,
   dayPalette: ThemePaletteId,
   nightPalette: ThemePaletteId,
 ): ThemePaletteId {
-  return resolveEffectiveSlot(preference, systemDark) === 'night' ? nightPalette : dayPalette
+  return resolveEffectiveSlot(preference) === 'night' ? nightPalette : dayPalette
 }

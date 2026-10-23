@@ -758,7 +758,6 @@ export const zhHant: Resources = {
       nightPalette: '暗夜色卡',
       nightPaletteDescription: '用於自動模式與暗夜模式；可選擇任意色卡。',
       currentPalette: '目前使用{{slot}} · {{palette}}',
-      autoUsesNight: '使用暗夜',
       themePair: '日間與暗夜配色',
       themePairDescription: '你儲存的日間與暗夜配色；自動模式使用暗夜配色。樣式推薦色不會覆寫它們。',
       customizePalettes: '自訂配色',
