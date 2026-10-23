@@ -716,7 +716,27 @@ async function startDesktopLauncher(repoRoot: string, updateAttemptPath: string,
   }
 }
 
-app.whenReady().then(async () => {
+// A second desktop launch must focus the running window instead of starting
+// another guardian + backend. Explicit alternate data homes and the
+// existing-owner smoke keep the handoff path.
+const explicitDataHome = process.env['OPENALICE_HOME']?.trim()
+const integratedProjectArg = process.argv.some(arg => arg.startsWith('--openalice-integrated-project='))
+const singleInstanceExempt = Boolean(
+  explicitDataHome
+  || integratedProjectArg
+  || process.env['OPENALICE_ELECTRON_SMOKE_EXISTING_OWNER'],
+)
+const hasSingleInstanceLock = singleInstanceExempt ? true : app.requestSingleInstanceLock()
+if (!hasSingleInstanceLock) {
+  app.exit(0)
+} else {
+  app.on('second-instance', () => {
+    const [window] = BrowserWindow.getAllWindows()
+    if (window) showAppWindow(window)
+  })
+}
+
+if (hasSingleInstanceLock) app.whenReady().then(async () => {
   desktopDiagnostics = new DesktopDiagnostics(join(app.getPath('logs'), 'desktop.log'))
   desktopDiagnostics.write('desktop', `starting OpenAlice ${CLI_VERSION} pid=${process.pid}`)
   const updateAttemptPath = join(app.getPath('userData'), UPDATE_ATTEMPT_FILE)
@@ -1200,6 +1220,7 @@ app.whenReady().then(async () => {
 
   let modeSwitching = false
   const { window: win } = createAppWindow(resolve(__dirname, 'preload.js'))
+  win.once('ready-to-show', () => showAppWindow(win))
   const activity = startActivity(win)
   createTray(win)
   activity?.configure({
