@@ -607,6 +607,7 @@ function configureDesktopUpdates(win: BrowserWindow, updateAttemptPath: string):
 async function startDesktopLauncher(repoRoot: string, updateAttemptPath: string, startupError?: unknown): Promise<void> {
   localRuntimeSuspended = true
   const { window: win } = createAppWindow(resolve(__dirname, 'preload.js'))
+  applyPendingSecondInstanceFocus(win)
   const activity = startActivity(win)
   const clientUpdates = configureDesktopUpdates(win, updateAttemptPath)
   const relay = new WebRelay({ clientUpdates, uiRoot: app.isPackaged ? join(process.resourcesPath, 'runtime', 'ui', 'dist') : join(repoRoot, 'ui', 'dist') })
@@ -724,16 +725,27 @@ const integratedProjectArg = process.argv.some(arg => arg.startsWith('--openalic
 const singleInstanceExempt = Boolean(
   explicitDataHome
   || integratedProjectArg
-  || process.env['OPENALICE_ELECTRON_SMOKE_EXISTING_OWNER'],
+  || existingOwnerSmokeMode(),
 )
+// The guardian bring-up takes seconds; a second launch that lands before the
+// first window exists must still focus that window once it is ready.
+let pendingSecondInstanceFocus = false
 const hasSingleInstanceLock = singleInstanceExempt ? true : app.requestSingleInstanceLock()
 if (!hasSingleInstanceLock) {
   app.exit(0)
 } else {
   app.on('second-instance', () => {
+    if (appQuitting) return
     const [window] = BrowserWindow.getAllWindows()
     if (window) showAppWindow(window)
+    else pendingSecondInstanceFocus = true
   })
+}
+
+function applyPendingSecondInstanceFocus(win: BrowserWindow): void {
+  if (!pendingSecondInstanceFocus) return
+  pendingSecondInstanceFocus = false
+  win.once('ready-to-show', () => { if (!appQuitting) showAppWindow(win) })
 }
 
 if (hasSingleInstanceLock) app.whenReady().then(async () => {
@@ -1220,7 +1232,7 @@ if (hasSingleInstanceLock) app.whenReady().then(async () => {
 
   let modeSwitching = false
   const { window: win } = createAppWindow(resolve(__dirname, 'preload.js'))
-  win.once('ready-to-show', () => showAppWindow(win))
+  applyPendingSecondInstanceFocus(win)
   const activity = startActivity(win)
   createTray(win)
   activity?.configure({
